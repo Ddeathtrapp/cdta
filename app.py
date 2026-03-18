@@ -8,7 +8,7 @@ from typing import Any
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
 from services.cdta import CDTAService, GTFSDownloadError, GTFSLoadError, ResolvedLocation, TransitLookupResult
-from services.geocode import CensusGeocoder, GeocodeError
+from services.geocode import GeocodeError, LocationGeocoder
 from services.gtfs_loader import GTFSLoader, SERVICE_TIMEZONE
 from services.locations import DuplicateNicknameError, LocationStore, SavedLocationNotFoundError, SavedLocation
 from services.realtime import GTFSRealtimeService
@@ -35,7 +35,7 @@ def create_app(settings: Settings | None = None) -> Flask:
 
     location_store = LocationStore(settings.db_path)
     location_store.initialize()
-    geocoder = CensusGeocoder(
+    geocoder = LocationGeocoder(
         timeout_seconds=settings.http_timeout_seconds,
         user_agent=settings.http_user_agent,
     )
@@ -279,11 +279,18 @@ def create_app(settings: Settings | None = None) -> Flask:
         response.status_code = status_code
         return response
 
+    def status_code_for_geocode_error(exc: GeocodeError) -> int:
+        if "Could not reach" in str(exc):
+            return 502
+        if "No nearby address was found" in str(exc):
+            return 404
+        return 400
+
     def status_code_for_resolution_error(exc: Exception) -> int:
         if isinstance(exc, SavedLocationNotFoundError):
             return 404
-        if isinstance(exc, GeocodeError) and "Could not reach" in str(exc):
-            return 502
+        if isinstance(exc, GeocodeError):
+            return status_code_for_geocode_error(exc)
         return 400
 
     def serialize_saved_location(saved_location: SavedLocation) -> dict[str, Any]:
@@ -608,6 +615,37 @@ def create_app(settings: Settings | None = None) -> Flask:
                     serialize_saved_location(saved_location) for saved_location in location_store.list_locations()
                 ],
                 "generated_at": datetime.now(tz=SERVICE_TIMEZONE).isoformat(),
+            }
+        )
+
+    @app.get("/api/reverse-geocode")
+    def api_reverse_geocode():
+        try:
+            latitude, longitude = parse_coordinate_fields(
+                request.args.get("latitude"),
+                request.args.get("longitude"),
+                field_name="Reverse geocode",
+            )
+            match = geocoder.reverse_geocode(latitude, longitude)
+        except GeocodeError as exc:
+            return api_error(
+                str(exc),
+                status_code_for_geocode_error(exc),
+                code="reverse_geocode_failed",
+            )
+        except ValidationError as exc:
+            return api_error(
+                str(exc),
+                400,
+                code="invalid_request",
+            )
+
+        return jsonify(
+            {
+                "label": match.label,
+                "latitude": match.latitude,
+                "longitude": match.longitude,
+                "provider": "nominatim",
             }
         )
 

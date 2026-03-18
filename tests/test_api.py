@@ -4,8 +4,10 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import Mock
 
 from app import create_app
+from services.geocode import GeocodeError, GeocodeMatch
 from services.gtfs_loader import SERVICE_TIMEZONE
 from tests.helpers import create_sample_gtfs_feed, make_test_settings
 
@@ -96,6 +98,48 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         payload = response.get_json()
         self.assertEqual(payload["error"]["code"], "invalid_request")
+
+    def test_reverse_geocode_api_returns_label(self) -> None:
+        geocoder = self.app.extensions["geocoder"]
+        geocoder.reverse_geocode = Mock(
+            return_value=GeocodeMatch(
+                label="Empire State Plaza, Albany, NY 12223",
+                latitude=42.6526,
+                longitude=-73.7562,
+            )
+        )
+
+        response = self.client.get(
+            "/api/reverse-geocode",
+            query_string={
+                "latitude": "42.6526",
+                "longitude": "-73.7562",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["label"], "Empire State Plaza, Albany, NY 12223")
+        self.assertEqual(payload["provider"], "nominatim")
+        geocoder.reverse_geocode.assert_called_once_with(42.6526, -73.7562)
+
+    def test_reverse_geocode_api_returns_404_when_address_is_missing(self) -> None:
+        geocoder = self.app.extensions["geocoder"]
+        geocoder.reverse_geocode = Mock(
+            side_effect=GeocodeError("No nearby address was found for those coordinates.")
+        )
+
+        response = self.client.get(
+            "/api/reverse-geocode",
+            query_string={
+                "latitude": "42.6526",
+                "longitude": "-73.7562",
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        payload = response.get_json()
+        self.assertEqual(payload["error"]["code"], "reverse_geocode_failed")
 
     def test_lookup_api_returns_404_for_missing_saved_location(self) -> None:
         response = self.client.get(

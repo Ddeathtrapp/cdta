@@ -37,6 +37,7 @@ function initializeLocationPanel(panel) {
     const lonInput = panel.querySelector(`input[name="${scope}_current_lon"]`);
     const labelInput = panel.querySelector(`input[name="${scope}_current_label"]`);
     const form = panel.closest("form");
+    let currentLookupRequestId = 0;
 
     const setStatus = (message, state) => {
         if (!status) {
@@ -44,6 +45,26 @@ function initializeLocationPanel(panel) {
         }
         status.textContent = message;
         status.dataset.state = state;
+    };
+
+    const summarizeLocation = (label, latitude, longitude) => {
+        const coordinates = `${latitude}, ${longitude}`;
+        const cleanLabel = (label || "").trim();
+        if (!cleanLabel) {
+            return coordinates;
+        }
+
+        const normalizedLabel = cleanLabel.toLowerCase();
+        const normalizedCoordinates = coordinates.toLowerCase();
+        if (
+            normalizedLabel === normalizedCoordinates
+            || normalizedLabel === `coordinates ${normalizedCoordinates}`
+            || normalizedLabel === `browser location ${normalizedCoordinates}`
+        ) {
+            return cleanLabel;
+        }
+
+        return `${cleanLabel} (${coordinates})`;
     };
 
     const syncMode = () => {
@@ -60,7 +81,10 @@ function initializeLocationPanel(panel) {
     syncMode();
 
     if (latInput && lonInput && latInput.value && lonInput.value) {
-        setStatus(`Using ${latInput.value}, ${lonInput.value}`, "success");
+        setStatus(
+            `Using ${summarizeLocation(labelInput ? labelInput.value : "", latInput.value, lonInput.value)}`,
+            "success",
+        );
     }
 
     if (!button) {
@@ -68,17 +92,24 @@ function initializeLocationPanel(panel) {
     }
 
     button.addEventListener("click", () => {
+        const requestId = ++currentLookupRequestId;
         if (!navigator.geolocation) {
             setStatus("Browser geolocation is not available in this browser.", "error");
             return;
         }
 
+        button.disabled = true;
         setStatus("Requesting browser location permission...", "pending");
 
         navigator.geolocation.getCurrentPosition(
-            (position) => {
+            async (position) => {
+                if (requestId !== currentLookupRequestId) {
+                    return;
+                }
+
                 const latitude = position.coords.latitude.toFixed(6);
                 const longitude = position.coords.longitude.toFixed(6);
+                const fallbackLabel = `Coordinates ${latitude}, ${longitude}`;
 
                 if (latInput) {
                     latInput.value = latitude;
@@ -87,7 +118,7 @@ function initializeLocationPanel(panel) {
                     lonInput.value = longitude;
                 }
                 if (labelInput) {
-                    labelInput.value = `Browser location ${latitude}, ${longitude}`;
+                    labelInput.value = fallbackLabel;
                 }
 
                 const currentMode = panel.querySelector(`input[name="${scope}_mode"][value="current"]`);
@@ -99,15 +130,75 @@ function initializeLocationPanel(panel) {
                 if (form) {
                     persistSearchFormState(form);
                 }
-                setStatus(`Location captured: ${latitude}, ${longitude}`, "success");
+                setStatus("Location captured. Looking up nearby address...", "pending");
+
+                try {
+                    const response = await fetch(
+                        `/api/reverse-geocode?latitude=${encodeURIComponent(latitude)}&longitude=${encodeURIComponent(longitude)}`,
+                        {
+                            headers: {
+                                Accept: "application/json",
+                            },
+                        },
+                    );
+                    const payload = await response.json().catch(() => null);
+
+                    if (requestId !== currentLookupRequestId) {
+                        return;
+                    }
+                    if (!response.ok) {
+                        throw new Error(
+                            payload && payload.error && payload.error.message
+                                ? payload.error.message
+                                : "Nearby address lookup is unavailable right now.",
+                        );
+                    }
+
+                    const resolvedLabel = payload && typeof payload.label === "string" ? payload.label.trim() : "";
+                    if (labelInput) {
+                        labelInput.value = resolvedLabel || fallbackLabel;
+                    }
+                    if (form) {
+                        persistSearchFormState(form);
+                    }
+                    setStatus(
+                        `Using ${summarizeLocation(resolvedLabel || fallbackLabel, latitude, longitude)}`,
+                        "success",
+                    );
+                } catch (error) {
+                    if (requestId !== currentLookupRequestId) {
+                        return;
+                    }
+
+                    if (labelInput) {
+                        labelInput.value = fallbackLabel;
+                    }
+                    if (form) {
+                        persistSearchFormState(form);
+                    }
+
+                    const fallbackMessage = error instanceof Error && error.message
+                        ? error.message
+                        : "Nearby address lookup is unavailable right now.";
+                    setStatus(`Using ${fallbackLabel}. ${fallbackMessage}`, "warn");
+                } finally {
+                    if (requestId === currentLookupRequestId) {
+                        button.disabled = false;
+                    }
+                }
             },
             (error) => {
+                if (requestId !== currentLookupRequestId) {
+                    return;
+                }
+
                 let message = "Browser location permission was denied.";
                 if (error.code === error.POSITION_UNAVAILABLE) {
                     message = "Browser location is currently unavailable.";
                 } else if (error.code === error.TIMEOUT) {
                     message = "Browser location request timed out.";
                 }
+                button.disabled = false;
                 setStatus(message, "error");
             },
             {

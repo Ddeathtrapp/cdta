@@ -13,6 +13,7 @@ The app resolves both points to coordinates, finds nearby CDTA stops from the of
 
 - CDTA static GTFS feed: `https://www.cdta.org/schedules/google_transit.zip`
 - U.S. Census Geocoder: `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress`
+- OpenStreetMap Nominatim reverse geocoder: `https://nominatim.openstreetmap.org/reverse`
 - Optional CDTA GTFS-realtime trip updates: configure your official endpoint in `.env`
 
 ## Requirements
@@ -309,6 +310,7 @@ Typed input keeps the original safe behavior:
 
 - raw `lat,lon` is used directly
 - typed U.S. addresses go through the U.S. Census Geocoder over plain HTTP requests
+- browser geolocation attempts a reverse lookup through OpenStreetMap Nominatim so the UI can show a nearby address instead of coordinates alone
 - no geocoder wrapper libraries are added
 
 ## Saved nicknames
@@ -445,7 +447,7 @@ cdta/
 
 Implemented now:
 
-- browser geolocation with clear success/error UI
+- browser geolocation with clear success/error UI and nearby address translation when available
 - typed address lookup via direct Census Geocoder HTTP calls
 - raw latitude/longitude input
 - saved nickname CRUD with SQLite
