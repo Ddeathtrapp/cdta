@@ -95,6 +95,29 @@ def create_app(settings: Settings | None = None) -> Flask:
             status_code,
         )
 
+    def build_results_query(form_data: dict[str, str]) -> dict[str, str]:
+        query: dict[str, str] = {}
+        for scope in ("origin", "destination"):
+            mode = form_data.get(f"{scope}_mode", "typed")
+            query[f"{scope}_mode"] = mode
+            if mode == "current":
+                for suffix in ("current_lat", "current_lon", "current_label"):
+                    key = f"{scope}_{suffix}"
+                    value = form_data.get(key, "")
+                    if value:
+                        query[key] = value
+            elif mode == "saved":
+                key = f"{scope}_saved_id"
+                value = form_data.get(key, "")
+                if value:
+                    query[key] = value
+            else:
+                key = f"{scope}_typed_input"
+                value = form_data.get(key, "")
+                if value:
+                    query[key] = value
+        return query
+
     def resolved_from_saved_location(saved_location: SavedLocation) -> ResolvedLocation:
         return ResolvedLocation(
             source_type="saved",
@@ -282,6 +305,9 @@ def create_app(settings: Settings | None = None) -> Flask:
             "realtime_departure": departure.realtime_departure.isoformat() if departure.realtime_departure else None,
             "effective_departure": departure.effective_departure.isoformat(),
             "minutes": departure.minutes_until_departure,
+            "display_wait": departure.display_wait,
+            "display_departure_time": departure.display_departure_time,
+            "display_summary": departure.display_summary,
             "source": departure.source,
             "delay_seconds": departure.delay_seconds,
         }
@@ -366,9 +392,62 @@ def create_app(settings: Settings | None = None) -> Flask:
                 for candidate in transit_result.direct_candidates
             ],
             "realtime_used": transit_result.realtime_used,
+            "checked_at_display": transit_result.checked_at_text,
+            "destination_serviceable": transit_result.destination_serviceable,
+            "destination_service_message": transit_result.destination_service_message,
             "generated_at": transit_result.generated_at.isoformat(),
             "note": transit_result.note,
         }
+
+    def render_results_from_form_data(form_data: dict[str, str]):
+        errors: dict[str, str] = {}
+
+        origin: ResolvedLocation | None = None
+        destination: ResolvedLocation | None = None
+
+        try:
+            origin = resolve_location("origin", form_data)
+        except (ValidationError, SavedLocationNotFoundError, GeocodeError) as exc:
+            errors["origin"] = str(exc)
+
+        try:
+            destination = resolve_location("destination", form_data)
+        except (ValidationError, SavedLocationNotFoundError, GeocodeError) as exc:
+            errors["destination"] = str(exc)
+
+        if errors:
+            return render_home(form_data=form_data, errors=errors, status_code=400)
+
+        if origin is None or destination is None:
+            return render_home(
+                form_data=form_data,
+                errors={"form": "Could not resolve the requested locations."},
+                status_code=400,
+            )
+
+        transit_result = None
+        transit_error = None
+
+        try:
+            transit_result = cdta_service.lookup(
+                origin,
+                destination,
+                now=app.config["NOW_PROVIDER"](),
+            )
+        except (GTFSDownloadError, GTFSLoadError) as exc:
+            transit_error = str(exc)
+
+        status_code = 503 if transit_error else 200
+        return (
+            render_template(
+                "results.html",
+                origin=origin,
+                destination=destination,
+                transit_result=transit_result,
+                transit_error=transit_error,
+            ),
+            status_code,
+        )
 
     def resolve_api_location_from_query(scope: str) -> ResolvedLocation:
         scope_name = scope.title()
@@ -430,54 +509,14 @@ def create_app(settings: Settings | None = None) -> Flask:
     @app.post("/search")
     def search():
         form_data = request.form.to_dict(flat=True)
-        errors: dict[str, str] = {}
+        return redirect(url_for("results", **build_results_query(form_data)))
 
-        origin: ResolvedLocation | None = None
-        destination: ResolvedLocation | None = None
-
-        try:
-            origin = resolve_location("origin", form_data)
-        except (ValidationError, SavedLocationNotFoundError, GeocodeError) as exc:
-            errors["origin"] = str(exc)
-
-        try:
-            destination = resolve_location("destination", form_data)
-        except (ValidationError, SavedLocationNotFoundError, GeocodeError) as exc:
-            errors["destination"] = str(exc)
-
-        if errors:
-            return render_home(form_data=form_data, errors=errors, status_code=400)
-
-        if origin is None or destination is None:
-            return render_home(
-                form_data=form_data,
-                errors={"form": "Could not resolve the requested locations."},
-                status_code=400,
-            )
-
-        transit_result = None
-        transit_error = None
-
-        try:
-            transit_result = cdta_service.lookup(
-                origin,
-                destination,
-                now=app.config["NOW_PROVIDER"](),
-            )
-        except (GTFSDownloadError, GTFSLoadError) as exc:
-            transit_error = str(exc)
-
-        status_code = 503 if transit_error else 200
-        return (
-            render_template(
-                "results.html",
-                origin=origin,
-                destination=destination,
-                transit_result=transit_result,
-                transit_error=transit_error,
-            ),
-            status_code,
-        )
+    @app.get("/results")
+    def results():
+        form_data = request.args.to_dict(flat=True)
+        if not form_data:
+            return redirect(url_for("index"))
+        return render_results_from_form_data(form_data)
 
     @app.get("/saved-locations")
     def saved_locations():

@@ -5,7 +5,13 @@ import unittest
 from datetime import date, datetime
 from pathlib import Path
 
-from services.cdta import CDTAService, find_nearest_stops
+from services.cdta import (
+    CDTAService,
+    find_nearest_stops,
+    format_checked_at_text,
+    format_departure_clock_time,
+    format_wait_time,
+)
 from services.gtfs_loader import GTFSLoader, SERVICE_TIMEZONE
 from tests.helpers import create_sample_gtfs_feed
 
@@ -62,6 +68,19 @@ class NearestStopTests(unittest.TestCase):
         self.assertTrue(self.dataset.is_service_active("WEEKDAY", date(2026, 3, 19)))
         self.assertTrue(self.dataset.is_service_active("SPECIAL_EVENT", date(2026, 3, 18)))
 
+    def test_wait_time_formatting_is_human_friendly(self) -> None:
+        self.assertEqual(format_wait_time(0), "due now")
+        self.assertEqual(format_wait_time(12), "in 12 min")
+        self.assertEqual(format_wait_time(60), "in 1 hr")
+        self.assertEqual(format_wait_time(65), "in 1 hr 5 min")
+
+    def test_departure_clock_formatting_uses_12_hour_time(self) -> None:
+        departure_time = datetime(2026, 3, 19, 16, 4, tzinfo=SERVICE_TIMEZONE)
+        checked_at = datetime(2026, 3, 18, 16, 0, tzinfo=SERVICE_TIMEZONE)
+
+        self.assertEqual(format_departure_clock_time(departure_time), "4:04 PM")
+        self.assertEqual(format_checked_at_text(checked_at), "Checked at 4:00 PM on March 18, 2026")
+
     def test_upcoming_departures_group_by_route(self) -> None:
         now = datetime(2026, 3, 19, 8, 0, tzinfo=SERVICE_TIMEZONE)
 
@@ -73,6 +92,10 @@ class NearestStopTests(unittest.TestCase):
             [5, 29],
         )
         self.assertEqual(departures[0].headsign, "Downtown Albany")
+        self.assertEqual(
+            departures[0].departures[0].display_summary,
+            "in 5 min (departure time: 8:05 AM)",
+        )
         self.assertEqual(
             [departure.minutes_until_departure for departure in departures[1].departures],
             [11],

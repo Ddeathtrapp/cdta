@@ -56,9 +56,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["origin_nearest_stops"][0]["stop_name"], "Madison Ave & Swan St")
         route_payload = payload["origin_nearest_stops"][0]["routes"][0]
         self.assertEqual(route_payload["display_name"], "910 - BusPlus Red Line")
+        self.assertTrue(payload["destination_serviceable"])
+        self.assertIn("checked_at_display", payload)
         self.assertEqual(
             [departure["minutes"] for departure in route_payload["next_departures"]],
             [5, 29],
+        )
+        self.assertEqual(
+            route_payload["next_departures"][0]["display_wait"],
+            "in 5 min",
         )
 
     def test_lookup_api_post_happy_path(self) -> None:
@@ -104,6 +110,25 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         payload = response.get_json()
         self.assertEqual(payload["error"]["code"], "invalid_request")
+
+    def test_lookup_api_marks_far_destination_as_not_serviceable(self) -> None:
+        response = self.client.get(
+            "/api/lookup",
+            query_string={
+                "origin_lat": "42.6526",
+                "origin_lon": "-73.7562",
+                "destination_lat": "43.0000",
+                "destination_lon": "-74.5000",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertFalse(payload["destination_serviceable"])
+        self.assertEqual(
+            payload["destination_service_message"],
+            "Destination appears outside the CDTA service area.",
+        )
 
 
 if __name__ == "__main__":

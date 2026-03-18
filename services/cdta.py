@@ -24,6 +24,30 @@ DEPARTURE_GRACE_SECONDS = 45
 DEFAULT_OVERALL_DEPARTURE_LIMIT = 8
 
 
+def format_wait_time(minutes: int) -> str:
+    normalized_minutes = max(0, int(minutes))
+    if normalized_minutes == 0:
+        return "due now"
+    if normalized_minutes < 60:
+        return f"in {normalized_minutes} min"
+
+    hours, remainder_minutes = divmod(normalized_minutes, 60)
+    if remainder_minutes == 0:
+        return f"in {hours} hr"
+    return f"in {hours} hr {remainder_minutes} min"
+
+
+def format_departure_clock_time(departure_time: datetime) -> str:
+    localized = departure_time.astimezone(SERVICE_TIMEZONE)
+    hour = localized.hour % 12 or 12
+    return f"{hour}:{localized.minute:02d} {'AM' if localized.hour < 12 else 'PM'}"
+
+
+def format_checked_at_text(checked_at: datetime) -> str:
+    localized = checked_at.astimezone(SERVICE_TIMEZONE)
+    return f"Checked at {format_departure_clock_time(localized)} on {localized.strftime('%B')} {localized.day}, {localized.year}"
+
+
 @dataclass(frozen=True)
 class ResolvedLocation:
     source_type: str
@@ -64,11 +88,19 @@ class DepartureInfo:
 
     @property
     def relative_label(self) -> str:
-        if self.minutes_until_departure <= 0:
-            return "due"
-        if self.minutes_until_departure == 1:
-            return "in 1 min"
-        return f"in {self.minutes_until_departure} min"
+        return self.display_wait
+
+    @property
+    def display_wait(self) -> str:
+        return format_wait_time(self.minutes_until_departure)
+
+    @property
+    def display_departure_time(self) -> str:
+        return format_departure_clock_time(self.effective_departure)
+
+    @property
+    def display_summary(self) -> str:
+        return f"{self.display_wait} (departure time: {self.display_departure_time})"
 
 
 @dataclass(frozen=True)
@@ -85,7 +117,7 @@ class RouteDepartureGroup:
 
     @property
     def summary_text(self) -> str:
-        return ", ".join(departure.relative_label for departure in self.departures)
+        return ", ".join(departure.display_summary for departure in self.departures)
 
     @property
     def has_realtime(self) -> bool:
@@ -133,6 +165,8 @@ class TransitLookupResult:
     note: str
     generated_at: datetime
     realtime_used: bool
+    destination_serviceable: bool
+    destination_service_message: str | None
 
     @property
     def departure_source_note(self) -> str:
@@ -143,6 +177,10 @@ class TransitLookupResult:
     @property
     def generated_at_text(self) -> str:
         return self.generated_at.isoformat(timespec="seconds")
+
+    @property
+    def checked_at_text(self) -> str:
+        return format_checked_at_text(self.generated_at)
 
 
 def sort_routes(route_ids: set[str], routes: dict[str, RouteInfo]) -> list[RouteInfo]:
@@ -276,6 +314,10 @@ class CDTAService:
             for route_group in stop_result.route_departures
             for departure in route_group.departures
         )
+        destination_serviceable = any(stop.within_radius for stop in destination_stops)
+        destination_service_message = None
+        if not destination_serviceable:
+            destination_service_message = "Destination appears outside the CDTA service area."
 
         return TransitLookupResult(
             origin_stops=origin_stops,
@@ -288,6 +330,8 @@ class CDTAService:
             ),
             generated_at=current_time,
             realtime_used=realtime_used,
+            destination_serviceable=destination_serviceable,
+            destination_service_message=destination_service_message,
         )
 
     def _attach_departures(
@@ -526,6 +570,9 @@ __all__ = [
     "DEFAULT_OVERALL_DEPARTURE_LIMIT",
     "DepartureInfo",
     "DirectRouteCandidate",
+    "format_checked_at_text",
+    "format_departure_clock_time",
+    "format_wait_time",
     "GTFSDownloadError",
     "GTFSLoadError",
     "NearbyStopResult",

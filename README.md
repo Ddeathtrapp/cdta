@@ -89,6 +89,12 @@ python app.py run
 
 Then open `http://127.0.0.1:5000`.
 
+The HTML search flow now uses Post/Redirect/Get:
+
+- submitting the form redirects to a shareable `GET /results?...` URL
+- refreshing the results page does not trigger a browser form-resubmission warning
+- the home page remembers recent form choices and values with `localStorage` for convenience
+
 ## Refresh GTFS data
 
 The app keeps the official CDTA GTFS zip in `data/google_transit.zip`.
@@ -119,11 +125,15 @@ Behavior:
 - service calendars and exception dates are applied before showing a trip
 - departure times are interpreted in `America/New_York`
 - upcoming departures are grouped by route and limited to the next few results per stop
+- the HTML page shows the server-side lookup timestamp near the top, for example `Checked at 4:00 PM on March 18, 2026`
+- wait times are rendered in a human-friendly format such as `in 12 min`, `in 1 hr`, or `in 5 hr 27 min`
+- each departure also shows the effective clock time, for example `in 5 min (departure time: 4:04 PM)`
+- the HTML results page now focuses on origin-side routes and departures only; destination-side stop cards are not rendered
 
 Example HTML display:
 
-- `910 - BusPlus Red Line -> in 5 min, 29 min`
-- `114 - Madison / Washington -> in 11 min`
+- `910 - BusPlus Red Line -> in 5 min (departure time: 4:04 PM), in 29 min (departure time: 4:28 PM)`
+- `114 - Madison / Washington -> in 1 hr 5 min (departure time: 5:09 PM)`
 
 If realtime is not configured, the UI and API clearly indicate that departures are scheduled-only.
 
@@ -266,6 +276,9 @@ Example response shape:
               "realtime_departure": null,
               "effective_departure": "2026-03-19T08:05:00-04:00",
               "minutes": 5,
+              "display_wait": "in 5 min",
+              "display_departure_time": "8:05 AM",
+              "display_summary": "in 5 min (departure time: 8:05 AM)",
               "source": "scheduled",
               "delay_seconds": null
             }
@@ -278,6 +291,9 @@ Example response shape:
   "shared_routes": [],
   "direct_candidates": [],
   "realtime_used": false,
+  "checked_at_display": "Checked at 8:00 AM on March 19, 2026",
+  "destination_serviceable": true,
+  "destination_service_message": null,
   "generated_at": "2026-03-19T08:00:00-04:00",
   "note": "Nearby stops and shared routes are a helpful shortlist, but this MVP does not guarantee a full door-to-door itinerary. Direct-route candidates are heuristic matches based on GTFS stop order."
 }
@@ -318,9 +334,11 @@ Coverage now includes:
 - case-insensitive nickname uniqueness and nickname lookup
 - GTFS time parsing including values past `24:00:00`
 - service-calendar activation including `calendar_dates` overrides
+- wait-time formatting and departure clock formatting
 - next departure computation
 - no-results departure behavior
 - JSON API happy paths and validation errors
+- HTML checked-at rendering and Post/Redirect/Get results behavior
 
 ## Project structure
 
@@ -353,6 +371,10 @@ Implemented now:
 - shared-route highlighting
 - direct-route heuristic based on GTFS stop order
 - scheduled upcoming departures per nearby stop
+- human-friendly wait times and departure clock times in the HTML UI
+- checked-at timestamp at the top of results
+- Post/Redirect/Get results URLs to avoid browser resubmission prompts
+- localStorage-backed last-used form memory on the home page
 - optional GTFS-realtime trip-update overlay
 - Shortcut-friendly JSON API
 - manual GTFS refresh via CLI and web button

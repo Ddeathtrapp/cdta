@@ -390,7 +390,9 @@ button.danger {
 .departure-times {
     font-weight: 700;
     color: var(--accent-dark);
-    white-space: nowrap;
+    text-align: right;
+    max-width: 32rem;
+    white-space: normal;
 }
 
 code {
@@ -428,6 +430,7 @@ code {
     }
 
     .departure-times {
-        white-space: normal;
+        text-align: left;
+        max-width: none;
     }
 }
