@@ -24,8 +24,9 @@
             <p>{{ origin.label }}</p>
         {% endif %}
         <p>{{ origin.coordinates_text }}</p>
-        {% if origin.source_type != 'saved' %}
+        {% if is_admin and origin.source_type != 'saved' %}
             <form class="inline-form" method="post" action="{{ url_for('save_resolved_location') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="label" value="{{ origin.label }}">
                 <input type="hidden" name="latitude" value="{{ origin.latitude }}">
                 <input type="hidden" name="longitude" value="{{ origin.longitude }}">
@@ -46,8 +47,9 @@
         {% if transit_result and transit_result.destination_service_message %}
             <p class="muted-text note">{{ transit_result.destination_service_message }}</p>
         {% endif %}
-        {% if destination.source_type != 'saved' %}
+        {% if is_admin and destination.source_type != 'saved' %}
             <form class="inline-form" method="post" action="{{ url_for('save_resolved_location') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="label" value="{{ destination.label }}">
                 <input type="hidden" name="latitude" value="{{ destination.latitude }}">
                 <input type="hidden" name="longitude" value="{{ destination.longitude }}">

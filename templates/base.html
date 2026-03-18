@@ -16,10 +16,21 @@
             </div>
             <nav class="site-nav">
                 <a href="{{ url_for('index') }}">Home</a>
-                <a href="{{ url_for('saved_locations') }}">Saved Locations</a>
-                <form method="post" action="{{ url_for('refresh_gtfs') }}">
-                    <button class="button ghost" type="submit">Refresh GTFS</button>
-                </form>
+                {% if is_admin %}
+                    <a href="{{ url_for('saved_locations') }}">Saved Locations</a>
+                    <form class="nav-form" method="post" action="{{ url_for('refresh_gtfs') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="button ghost" type="submit">Refresh GTFS</button>
+                    </form>
+                    <form class="nav-form" method="post" action="{{ url_for('admin_logout') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="button ghost" type="submit">Log Out</button>
+                    </form>
+                {% elif admin_login_enabled %}
+                    <a href="{{ url_for('admin_login') }}">Admin Login</a>
+                {% else %}
+                    <span class="muted-text">Admin login unavailable</span>
+                {% endif %}
             </nav>
         </header>
 

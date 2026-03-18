@@ -232,6 +232,7 @@ def make_test_settings(project_root: Path) -> Settings:
         db_path=(project_root / "instance" / "saved_locations.sqlite"),
         flask_env="testing",
         secret_key="test-secret-key",
+        admin_password="test-admin-password",
         host="127.0.0.1",
         port=5000,
         debug=False,

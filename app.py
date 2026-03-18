@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+import secrets
 from datetime import datetime
+from functools import wraps
 from typing import Any
+from urllib.parse import urlsplit
 
-from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
 from services.cdta import CDTAService, GTFSDownloadError, GTFSLoadError, ResolvedLocation, TransitLookupResult
 from services.geocode import GeocodeError, LocationGeocoder
@@ -32,6 +35,9 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.config["SECRET_KEY"] = settings.secret_key
     app.config["SETTINGS"] = settings
     app.config["NOW_PROVIDER"] = lambda: datetime.now(tz=SERVICE_TIMEZONE)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = settings.flask_env == "production"
 
     location_store = LocationStore(settings.db_path)
     location_store.initialize()
@@ -64,6 +70,62 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.extensions["cdta_service"] = cdta_service
     app.extensions["realtime_service"] = realtime_service
 
+    def admin_login_enabled() -> bool:
+        return bool(settings.admin_password)
+
+    def admin_login_disabled_message() -> str:
+        return "Admin login is disabled until ADMIN_PASSWORD is configured."
+
+    def is_admin_authenticated() -> bool:
+        return bool(admin_login_enabled() and session.get("is_admin") is True)
+
+    def ensure_csrf_token() -> str:
+        csrf_token = session.get("_csrf_token")
+        if not csrf_token:
+            csrf_token = secrets.token_urlsafe(32)
+            session["_csrf_token"] = csrf_token
+        return csrf_token
+
+    def rotate_csrf_token() -> str:
+        csrf_token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = csrf_token
+        return csrf_token
+
+    def validate_csrf_token() -> None:
+        session_token = session.get("_csrf_token")
+        request_token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+        if not session_token or not request_token or not secrets.compare_digest(str(request_token), str(session_token)):
+            raise ValidationError("A valid CSRF token is required.")
+
+    def sanitize_next_url(raw_target: Any | None, *, default: str) -> str:
+        if raw_target is None:
+            return default
+
+        target = str(raw_target).strip()
+        if not target:
+            return default
+
+        parsed = urlsplit(target)
+        if parsed.scheme or parsed.netloc:
+            return default
+        if not target.startswith("/") or target.startswith("//"):
+            return default
+        return target
+
+    def current_relative_url() -> str:
+        query_string = request.query_string.decode("utf-8")
+        return f"{request.path}?{query_string}" if query_string else request.path
+
+    def render_admin_login(*, error: str | None = None, status_code: int = 200):
+        return (
+            render_template(
+                "admin_login.html",
+                login_error=error,
+                next_url=sanitize_next_url(request.values.get("next"), default=url_for("saved_locations")),
+            ),
+            status_code,
+        )
+
     @app.context_processor
     def inject_global_template_values() -> dict[str, Any]:
         return {
@@ -71,7 +133,24 @@ def create_app(settings: Settings | None = None) -> Flask:
             "feed_status": cdta_service.get_feed_status(),
             "realtime_enabled": settings.enable_realtime,
             "realtime_configured": bool(settings.enable_realtime and settings.realtime_trip_updates_url),
+            "is_admin": is_admin_authenticated(),
+            "admin_login_enabled": admin_login_enabled(),
+            "admin_login_disabled_message": admin_login_disabled_message(),
+            "csrf_token": ensure_csrf_token,
         }
+
+    @app.after_request
+    def add_admin_cache_headers(response):
+        admin_paths = (
+            "/admin/",
+            "/saved-locations",
+            "/api/saved-locations",
+            "/refresh-gtfs",
+        )
+        if request.path.startswith(admin_paths):
+            response.headers["Cache-Control"] = "no-store, no-cache, max-age=0, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+        return response
 
     def render_home(
         *,
@@ -88,7 +167,7 @@ def create_app(settings: Settings | None = None) -> Flask:
         return (
             render_template(
                 "index.html",
-                saved_locations=location_store.list_locations(),
+                saved_locations=location_store.list_locations() if is_admin_authenticated() else [],
                 form_data=payload,
                 errors=errors or {},
             ),
@@ -278,6 +357,45 @@ def create_app(settings: Settings | None = None) -> Flask:
         response = jsonify(payload)
         response.status_code = status_code
         return response
+
+    def auth_error_response(message: str, status_code: int, *, code: str):
+        if request.path.startswith("/api/"):
+            return api_error(message, status_code, code=code)
+        return message, status_code
+
+    def admin_required(*, redirect_to_login: bool = False):
+        def decorator(view_func):
+            @wraps(view_func)
+            def wrapped(*args, **kwargs):
+                if is_admin_authenticated():
+                    return view_func(*args, **kwargs)
+
+                if redirect_to_login:
+                    return redirect(
+                        url_for(
+                            "admin_login",
+                            next=current_relative_url(),
+                        )
+                    )
+
+                message = admin_login_disabled_message() if not admin_login_enabled() else "Admin login required."
+                status_code = 503 if not admin_login_enabled() else 401
+                return auth_error_response(message, status_code, code="admin_required")
+
+            return wrapped
+
+        return decorator
+
+    def csrf_protected(view_func):
+        @wraps(view_func)
+        def wrapped(*args, **kwargs):
+            try:
+                validate_csrf_token()
+            except ValidationError as exc:
+                return auth_error_response(str(exc), 400, code="invalid_csrf")
+            return view_func(*args, **kwargs)
+
+        return wrapped
 
     def status_code_for_geocode_error(exc: GeocodeError) -> int:
         if "Could not reach" in str(exc):
@@ -511,6 +629,39 @@ def create_app(settings: Settings | None = None) -> Flask:
             nickname=raw_location.get("nickname"),
         )
 
+    @app.get("/admin/login")
+    def admin_login():
+        if is_admin_authenticated():
+            return redirect(sanitize_next_url(request.args.get("next"), default=url_for("saved_locations")))
+        if not admin_login_enabled():
+            return render_admin_login(error=admin_login_disabled_message(), status_code=503)
+        return render_admin_login()
+
+    @app.post("/admin/login")
+    @csrf_protected
+    def admin_login_submit():
+        if not admin_login_enabled():
+            return render_admin_login(error=admin_login_disabled_message(), status_code=503)
+
+        password = request.form.get("password", "")
+        if not secrets.compare_digest(password, settings.admin_password or ""):
+            return render_admin_login(error="Incorrect admin password.", status_code=401)
+
+        next_url = sanitize_next_url(request.form.get("next"), default=url_for("saved_locations"))
+        session.clear()
+        session["is_admin"] = True
+        rotate_csrf_token()
+        flash("Admin session started.", "success")
+        return redirect(next_url)
+
+    @app.post("/admin/logout")
+    @admin_required()
+    @csrf_protected
+    def admin_logout():
+        session.clear()
+        flash("Admin session ended.", "success")
+        return redirect(url_for("index"))
+
     @app.get("/")
     def index():
         return render_home()
@@ -528,6 +679,7 @@ def create_app(settings: Settings | None = None) -> Flask:
         return render_results_from_form_data(form_data)
 
     @app.get("/saved-locations")
+    @admin_required(redirect_to_login=True)
     def saved_locations():
         return render_template(
             "saved_locations.html",
@@ -535,6 +687,8 @@ def create_app(settings: Settings | None = None) -> Flask:
         )
 
     @app.post("/saved-locations/create")
+    @admin_required()
+    @csrf_protected
     def create_saved_location():
         nickname = request.form.get("nickname", "")
         location_input = request.form.get("location_input", "")
@@ -549,6 +703,8 @@ def create_app(settings: Settings | None = None) -> Flask:
         return redirect(url_for("saved_locations"))
 
     @app.post("/saved-locations/<int:location_id>/update")
+    @admin_required()
+    @csrf_protected
     def update_saved_location(location_id: int):
         nickname = request.form.get("nickname", "")
         try:
@@ -560,6 +716,8 @@ def create_app(settings: Settings | None = None) -> Flask:
         return redirect(url_for("saved_locations"))
 
     @app.post("/saved-locations/<int:location_id>/delete")
+    @admin_required()
+    @csrf_protected
     def delete_saved_location(location_id: int):
         try:
             location_store.delete_location(location_id)
@@ -570,6 +728,8 @@ def create_app(settings: Settings | None = None) -> Flask:
         return redirect(url_for("saved_locations"))
 
     @app.post("/saved-locations/save-resolved")
+    @admin_required()
+    @csrf_protected
     def save_resolved_location():
         nickname = request.form.get("nickname", "")
         label = request.form.get("label", "")
@@ -589,6 +749,8 @@ def create_app(settings: Settings | None = None) -> Flask:
         return redirect(url_for("saved_locations"))
 
     @app.post("/refresh-gtfs")
+    @admin_required()
+    @csrf_protected
     def refresh_gtfs():
         try:
             path = cdta_service.refresh_feed()
@@ -608,6 +770,7 @@ def create_app(settings: Settings | None = None) -> Flask:
         )
 
     @app.get("/api/saved-locations")
+    @admin_required()
     def api_saved_locations():
         return jsonify(
             {

@@ -58,6 +58,7 @@ class Settings:
     db_path: Path
     flask_env: str
     secret_key: str
+    admin_password: str | None
     host: str
     port: int
     debug: bool
@@ -102,6 +103,7 @@ def load_settings() -> Settings:
         db_path=instance_path / "saved_locations.sqlite",
         flask_env=flask_env,
         secret_key=secret_key,
+        admin_password=os.environ.get("ADMIN_PASSWORD") or None,
         host=os.environ.get("HOST", "0.0.0.0" if flask_env == "production" else "127.0.0.1"),
         port=_get_int("PORT", 8080 if flask_env == "production" else 5000),
         debug=_get_bool("FLASK_DEBUG", flask_env == "development"),

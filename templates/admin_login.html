@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero card">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>Admin login</h1>
+        <p class="lede">
+            Admin access protects saved-location management, GTFS refresh, and other maintenance actions.
+        </p>
+    </div>
+    <a class="button secondary" href="{{ url_for('index') }}">Back to Search</a>
+</section>
+
+<section class="card admin-card">
+    {% if login_error %}
+        <p class="error-text">{{ login_error }}</p>
+    {% endif %}
+
+    {% if admin_login_enabled %}
+        <form class="stack-form" method="post" action="{{ url_for('admin_login_submit') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ next_url }}">
+
+            <label for="password">Admin password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+            <button class="button primary" type="submit">Log In</button>
+        </form>
+    {% else %}
+        <p class="muted-text">{{ admin_login_disabled_message }}</p>
+    {% endif %}
+</section>
+{% endblock %}

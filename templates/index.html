@@ -10,7 +10,11 @@
             It is intentionally honest about limits: shared routes are not the same thing as a guaranteed itinerary.
         </p>
     </div>
-    <a class="button secondary" href="{{ url_for('saved_locations') }}">Manage Saved Nicknames</a>
+    {% if is_admin %}
+        <a class="button secondary" href="{{ url_for('saved_locations') }}">Manage Saved Nicknames</a>
+    {% elif admin_login_enabled %}
+        <a class="button secondary" href="{{ url_for('admin_login', next=url_for('saved_locations')) }}">Admin Login</a>
+    {% endif %}
 </section>
 
 {% if errors.form %}
@@ -26,7 +30,13 @@
                 <p class="eyebrow">Start</p>
                 <h2>Origin</h2>
             </div>
-            <span class="pill info">Choose current, typed, or saved</span>
+            <span class="pill info">
+                {% if is_admin %}
+                    Choose current, typed, or saved
+                {% else %}
+                    Choose current or typed
+                {% endif %}
+            </span>
         </div>
 
         {% if errors.origin %}
@@ -42,10 +52,12 @@
                 <input type="radio" name="origin_mode" value="typed" {% if form_data.origin_mode == 'typed' %}checked{% endif %}>
                 <span>Type a location</span>
             </label>
-            <label class="mode-choice">
-                <input type="radio" name="origin_mode" value="saved" {% if form_data.origin_mode == 'saved' %}checked{% endif %}>
-                <span>Use a saved nickname</span>
-            </label>
+            {% if is_admin %}
+                <label class="mode-choice">
+                    <input type="radio" name="origin_mode" value="saved" {% if form_data.origin_mode == 'saved' %}checked{% endif %}>
+                    <span>Use a saved nickname</span>
+                </label>
+            {% endif %}
         </div>
 
         <div class="mode-content" data-mode="current">
@@ -67,20 +79,22 @@
             >
         </div>
 
-        <div class="mode-content" data-mode="saved">
-            <label for="origin_saved_id">Saved nickname</label>
-            <select id="origin_saved_id" name="origin_saved_id">
-                <option value="">Choose a saved location</option>
-                {% for saved in saved_locations %}
-                    <option value="{{ saved.id }}" {% if form_data.origin_saved_id == saved.id|string %}selected{% endif %}>
-                        {{ saved.nickname }} - {{ saved.original_label }}
-                    </option>
-                {% endfor %}
-            </select>
-            {% if not saved_locations %}
-                <p class="muted-text">No saved nicknames yet. Add one from the Saved Locations page.</p>
-            {% endif %}
-        </div>
+        {% if is_admin %}
+            <div class="mode-content" data-mode="saved">
+                <label for="origin_saved_id">Saved nickname</label>
+                <select id="origin_saved_id" name="origin_saved_id">
+                    <option value="">Choose a saved location</option>
+                    {% for saved in saved_locations %}
+                        <option value="{{ saved.id }}" {% if form_data.origin_saved_id == saved.id|string %}selected{% endif %}>
+                            {{ saved.nickname }} - {{ saved.original_label }}
+                        </option>
+                    {% endfor %}
+                </select>
+                {% if not saved_locations %}
+                    <p class="muted-text">No saved nicknames yet. Add one from the Saved Locations page.</p>
+                {% endif %}
+            </div>
+        {% endif %}
     </section>
 
     <section class="card location-panel" data-scope="destination">
@@ -89,7 +103,13 @@
                 <p class="eyebrow">Finish</p>
                 <h2>Destination</h2>
             </div>
-            <span class="pill info">Current location is also allowed</span>
+            <span class="pill info">
+                {% if is_admin %}
+                    Current location and saved nicknames are allowed
+                {% else %}
+                    Current location is also allowed
+                {% endif %}
+            </span>
         </div>
 
         {% if errors.destination %}
@@ -102,13 +122,15 @@
                 <span>Type a location</span>
             </label>
             <label class="mode-choice">
-                <input type="radio" name="destination_mode" value="saved" {% if form_data.destination_mode == 'saved' %}checked{% endif %}>
-                <span>Use a saved nickname</span>
-            </label>
-            <label class="mode-choice">
                 <input type="radio" name="destination_mode" value="current" {% if form_data.destination_mode == 'current' %}checked{% endif %}>
                 <span>Use current location</span>
             </label>
+            {% if is_admin %}
+                <label class="mode-choice">
+                    <input type="radio" name="destination_mode" value="saved" {% if form_data.destination_mode == 'saved' %}checked{% endif %}>
+                    <span>Use a saved nickname</span>
+                </label>
+            {% endif %}
         </div>
 
         <div class="mode-content" data-mode="typed">
@@ -122,20 +144,22 @@
             >
         </div>
 
-        <div class="mode-content" data-mode="saved">
-            <label for="destination_saved_id">Saved nickname</label>
-            <select id="destination_saved_id" name="destination_saved_id">
-                <option value="">Choose a saved location</option>
-                {% for saved in saved_locations %}
-                    <option value="{{ saved.id }}" {% if form_data.destination_saved_id == saved.id|string %}selected{% endif %}>
-                        {{ saved.nickname }} - {{ saved.original_label }}
-                    </option>
-                {% endfor %}
-            </select>
-            {% if not saved_locations %}
-                <p class="muted-text">No saved nicknames yet. Add one from the Saved Locations page.</p>
-            {% endif %}
-        </div>
+        {% if is_admin %}
+            <div class="mode-content" data-mode="saved">
+                <label for="destination_saved_id">Saved nickname</label>
+                <select id="destination_saved_id" name="destination_saved_id">
+                    <option value="">Choose a saved location</option>
+                    {% for saved in saved_locations %}
+                        <option value="{{ saved.id }}" {% if form_data.destination_saved_id == saved.id|string %}selected{% endif %}>
+                            {{ saved.nickname }} - {{ saved.original_label }}
+                        </option>
+                    {% endfor %}
+                </select>
+                {% if not saved_locations %}
+                    <p class="muted-text">No saved nicknames yet. Add one from the Saved Locations page.</p>
+                {% endif %}
+            </div>
+        {% endif %}
 
         <div class="mode-content" data-mode="current">
             <button class="button secondary js-current-location" type="button">Use browser location</button>

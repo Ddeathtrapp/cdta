@@ -63,6 +63,7 @@ Current `.env.example` values:
 ```dotenv
 FLASK_ENV=development
 SECRET_KEY=change-me
+ADMIN_PASSWORD=change-me-admin
 HOST=127.0.0.1
 PORT=5000
 APP_STORAGE_DIR=
@@ -80,9 +81,42 @@ CDTA_REALTIME_VEHICLE_POSITIONS_URL=
 Notes:
 
 - `SECRET_KEY` should be set to a stable secret for any shared or deployed environment.
+- `ADMIN_PASSWORD` enables the admin login used for saved-location management and GTFS refresh actions.
+- If `ADMIN_PASSWORD` is missing, public lookup still works, but admin login and admin-only routes stay disabled with a clear message.
 - Leave `APP_STORAGE_DIR` blank for local development. When it is set, SQLite and GTFS cache files are stored under that root.
 - If `ENABLE_REALTIME=false` or `CDTA_REALTIME_TRIP_UPDATES_URL` is blank, the app stays fully usable with scheduled departures only.
 - If your realtime provider expects auth in a different shape than `x-api-key`, place the token directly in the configured URL or adapt the local config before deployment.
+
+## Admin access
+
+Public read-only routes stay available without logging in:
+
+- `GET /`
+- `GET /results`
+- `GET /api/health`
+- `GET /api/lookup`
+- `POST /api/lookup`
+- static assets under `/static/...`
+
+Admin-only routes and actions require the password from `ADMIN_PASSWORD`:
+
+- `GET /admin/login`
+- `POST /admin/login`
+- `POST /admin/logout`
+- `GET /saved-locations`
+- `POST /saved-locations/create`
+- `POST /saved-locations/<id>/update`
+- `POST /saved-locations/<id>/delete`
+- `POST /saved-locations/save-resolved`
+- `POST /refresh-gtfs`
+- `GET /api/saved-locations`
+
+Behavior:
+
+- Log in from `/admin/login` with the single admin password.
+- Log out from the navigation logout button or by posting to `/admin/logout`.
+- Admin POST forms use a lightweight session-backed CSRF token.
+- Anonymous visitors still get public transit lookup, but admin buttons and saved-location management controls stay hidden.
 
 ## Run the app
 
@@ -112,6 +146,7 @@ python app.py refresh-gtfs
 ```
 
 You can also use the `Refresh GTFS` button in the web UI.
+That button is only shown to logged-in admins.
 
 ## Scheduled departures
 
@@ -165,11 +200,11 @@ If the feed is unavailable or not configured, the app falls back gracefully to s
 The app now includes Shortcut-friendly JSON endpoints:
 
 - `GET /api/health`
-- `GET /api/saved-locations`
+- `GET /api/saved-locations` (admin only)
 - `GET /api/lookup`
 - `POST /api/lookup`
 
-API routes always return JSON, including validation errors.
+API routes always return JSON, including validation errors. Public Shortcut-style lookups do not require admin auth.
 
 ### Health example
 
@@ -318,14 +353,18 @@ Typed input keeps the original safe behavior:
 - Saved locations are stored in SQLite at `instance/saved_locations.sqlite` by default.
 - If `APP_STORAGE_DIR` is set, the database moves to `APP_STORAGE_DIR/instance/saved_locations.sqlite`.
 - Nicknames are unique case-insensitively, so `Home` and `home` cannot both exist.
-- API lookup can resolve saved locations by either numeric `saved_id` or nickname.
+- The saved-location management page and CRUD actions are admin-only.
+- Listing saved locations through `GET /api/saved-locations` is admin-only.
+- API lookup can still resolve a saved location by known numeric `saved_id` or nickname.
 
 ## Security and deployment notes
 
-- API routes are read-only except for the existing saved-location HTML form actions.
-- For public deployment, protect the saved-location write routes behind auth or private network access.
+- Admin/write actions now use one password from `ADMIN_PASSWORD` plus Flask session auth.
+- Session cookies are sent with `HttpOnly`, `SameSite=Lax`, and `Secure` in production.
+- Admin HTML routes add `Cache-Control: no-store` style headers to reduce caching risk.
+- Saved-location writes, GTFS refresh, login, and logout all require CSRF tokens.
 - Do not commit real secrets into `.env`.
-- `SECRET_KEY` should come from environment for deployed environments.
+- `SECRET_KEY` and `ADMIN_PASSWORD` should come from environment or Fly secrets in deployed environments.
 - `debug` mode should stay off in production.
 
 ## Fly.io deployment
@@ -378,15 +417,15 @@ Saved locations and GTFS cache persistence depend on Fly volume storage:
 fly volumes create app_data --region yul --size 3
 ```
 
-### 5. Set the production secret
+### 5. Set the production secrets
 
-Set a real secret key before deploying:
+Set a real secret key and admin password before deploying:
 
 ```powershell
-fly secrets set SECRET_KEY="replace-with-a-long-random-secret"
+fly secrets set SECRET_KEY="replace-with-a-long-random-secret" ADMIN_PASSWORD="replace-with-a-strong-admin-password"
 ```
 
-The app now fails clearly in production if `SECRET_KEY` is missing.
+The app now fails clearly in production if `SECRET_KEY` is missing. If `ADMIN_PASSWORD` is missing, public lookup stays up but admin login is disabled until the secret is added.
 
 ### 6. Deploy
 
@@ -418,6 +457,10 @@ Coverage now includes:
 
 - latitude/longitude parsing and validation
 - case-insensitive nickname uniqueness and nickname lookup
+- admin login, logout, and session protection
+- CSRF enforcement on admin POST actions
+- anonymous access checks for public routes
+- protected admin routes and GTFS refresh checks
 - GTFS time parsing including values past `24:00:00`
 - service-calendar activation including `calendar_dates` overrides
 - wait-time formatting and departure clock formatting
@@ -451,6 +494,7 @@ Implemented now:
 - typed address lookup via direct Census Geocoder HTTP calls
 - raw latitude/longitude input
 - saved nickname CRUD with SQLite
+- password-protected admin session for saved-location management and GTFS refresh
 - official CDTA GTFS download/cache/load flow
 - nearby origin and destination stops
 - routes serving nearby stops

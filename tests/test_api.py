@@ -33,12 +33,12 @@ class ApiTests(unittest.TestCase):
         store = self.app.extensions["location_store"]
         self.saved_location = store.create_location("Home", "Broadway & State St", 42.6540, -73.7500)
 
-    def test_saved_locations_api_returns_records(self) -> None:
+    def test_saved_locations_api_requires_admin(self) -> None:
         response = self.client.get("/api/saved-locations")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 401)
         payload = response.get_json()
-        self.assertEqual(payload["saved_locations"][0]["nickname"], "Home")
+        self.assertEqual(payload["error"]["code"], "admin_required")
 
     def test_lookup_api_get_happy_path(self) -> None:
         response = self.client.get(

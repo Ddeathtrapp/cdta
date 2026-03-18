@@ -22,6 +22,7 @@
     </div>
 
     <form class="stack-form" method="post" action="{{ url_for('create_saved_location') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label for="nickname">Nickname</label>
         <input id="nickname" name="nickname" type="text" placeholder="Home" required>
 
@@ -47,11 +48,13 @@
             <p class="muted-text">Updated {{ saved.updated_at }}</p>
 
             <form class="inline-form" method="post" action="{{ url_for('update_saved_location', location_id=saved.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="text" name="nickname" value="{{ saved.nickname }}" required>
                 <button class="button secondary" type="submit">Rename</button>
             </form>
 
             <form method="post" action="{{ url_for('delete_saved_location', location_id=saved.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="button danger" type="submit">Delete</button>
             </form>
         </article>

@@ -24,6 +24,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.host, "127.0.0.1")
         self.assertEqual(settings.port, 5000)
         self.assertTrue(settings.secret_key)
+        self.assertIsNone(settings.admin_password)
 
     @patch("utils.config._load_env")
     def test_load_settings_uses_storage_root_when_configured(self, _mock_load_env) -> None:
@@ -42,6 +43,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.instance_path, Path("/data/instance"))
         self.assertEqual(settings.data_dir, Path("/data/data"))
         self.assertEqual(settings.db_path, Path("/data/instance/saved_locations.sqlite"))
+        self.assertIsNone(settings.admin_password)
         self.assertEqual(settings.host, "0.0.0.0")
         self.assertEqual(settings.port, 8080)
 
@@ -72,6 +74,20 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.flask_env, "production")
         self.assertEqual(settings.host, "0.0.0.0")
         self.assertEqual(settings.port, 8080)
+
+    @patch("utils.config._load_env")
+    def test_load_settings_reads_admin_password_when_configured(self, _mock_load_env) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SECRET_KEY": "dev-secret",
+                "ADMIN_PASSWORD": "admin-secret",
+            },
+            clear=True,
+        ):
+            settings = load_settings()
+
+        self.assertEqual(settings.admin_password, "admin-secret")
 
 
 if __name__ == "__main__":
