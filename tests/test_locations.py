@@ -19,6 +19,17 @@ class SavedLocationStoreTests(unittest.TestCase):
             with self.assertRaises(DuplicateNicknameError):
                 store.create_location("home", "1 Crossgates Mall Rd Albany NY", 42.6881, -73.8498)
 
+    def test_can_lookup_saved_location_by_nickname(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "saved_locations.sqlite"
+            store = LocationStore(db_path)
+            store.initialize()
+
+            created = store.create_location("Home", "110 State St Albany NY", 42.6503, -73.7540)
+            loaded = store.get_location_by_nickname("home")
+
+            self.assertEqual(created.id, loaded.id)
+
 
 if __name__ == "__main__":
     unittest.main()

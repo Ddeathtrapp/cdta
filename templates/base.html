@@ -31,7 +31,9 @@
                 <span class="pill warn">GTFS cache missing</span>
                 <span>The app will try to download the official feed on demand.</span>
             {% endif %}
-            {% if realtime_enabled %}
+            {% if realtime_enabled and realtime_configured %}
+                <span class="pill info">Realtime trip updates enabled</span>
+            {% elif realtime_enabled %}
                 <span class="pill info">Realtime scaffold enabled</span>
             {% endif %}
         </section>

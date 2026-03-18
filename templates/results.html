@@ -61,6 +61,22 @@
         </p>
     </section>
 {% else %}
+    <section class="card callout-card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Departures</p>
+                <h2>Upcoming service at nearby stops</h2>
+            </div>
+            {% if transit_result.realtime_used %}
+                <span class="pill info">Realtime mixed in</span>
+            {% else %}
+                <span class="pill success">Scheduled only</span>
+            {% endif %}
+        </div>
+        <p class="muted-text">{{ transit_result.departure_source_note }}</p>
+        <p class="muted-text note">Generated {{ transit_result.generated_at_text }}</p>
+    </section>
+
     <section class="results-grid">
         <article class="card">
             <div class="section-heading">
@@ -84,6 +100,24 @@
                                 {% else %}
                                     <span class="muted-text">No routes found for this stop.</span>
                                 {% endfor %}
+                            </div>
+                            <div class="departures-panel">
+                                <p class="muted-text departure-note">{{ stop_result.departures_summary_label }}</p>
+                                {% if stop_result.route_departures %}
+                                    <div class="departure-list">
+                                        {% for route_group in stop_result.route_departures %}
+                                            <article class="departure-row">
+                                                <div>
+                                                    <p class="departure-route">{{ route_group.route.display_name }}</p>
+                                                    {% if route_group.headsign %}
+                                                        <p class="muted-text departure-headsign">{{ route_group.headsign }}</p>
+                                                    {% endif %}
+                                                </div>
+                                                <p class="departure-times">{{ route_group.summary_text }}</p>
+                                            </article>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
                             </div>
                         </article>
                     {% endfor %}
@@ -115,6 +149,24 @@
                                 {% else %}
                                     <span class="muted-text">No routes found for this stop.</span>
                                 {% endfor %}
+                            </div>
+                            <div class="departures-panel">
+                                <p class="muted-text departure-note">{{ stop_result.departures_summary_label }}</p>
+                                {% if stop_result.route_departures %}
+                                    <div class="departure-list">
+                                        {% for route_group in stop_result.route_departures %}
+                                            <article class="departure-row">
+                                                <div>
+                                                    <p class="departure-route">{{ route_group.route.display_name }}</p>
+                                                    {% if route_group.headsign %}
+                                                        <p class="muted-text departure-headsign">{{ route_group.headsign }}</p>
+                                                    {% endif %}
+                                                </div>
+                                                <p class="departure-times">{{ route_group.summary_text }}</p>
+                                            </article>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
                             </div>
                         </article>
                     {% endfor %}

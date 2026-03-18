@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import argparse
 import logging
+from datetime import datetime
 from typing import Any
 
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
-from services.cdta import CDTAService, GTFSDownloadError, GTFSLoadError, ResolvedLocation
+from services.cdta import CDTAService, GTFSDownloadError, GTFSLoadError, ResolvedLocation, TransitLookupResult
 from services.geocode import CensusGeocoder, GeocodeError
-from services.gtfs_loader import GTFSLoader
-from services.locations import DuplicateNicknameError, LocationStore, SavedLocationNotFoundError
+from services.gtfs_loader import GTFSLoader, SERVICE_TIMEZONE
+from services.locations import DuplicateNicknameError, LocationStore, SavedLocationNotFoundError, SavedLocation
+from services.realtime import GTFSRealtimeService
 from utils.config import Settings, load_settings
 from utils.geo import format_coordinates
 from utils.validation import ValidationError, parse_coordinate_fields, parse_lat_lon_input, require_text
@@ -29,6 +31,7 @@ def create_app(settings: Settings | None = None) -> Flask:
     app = Flask(__name__, instance_path=str(settings.instance_path), instance_relative_config=False)
     app.config["SECRET_KEY"] = settings.secret_key
     app.config["SETTINGS"] = settings
+    app.config["NOW_PROVIDER"] = lambda: datetime.now(tz=SERVICE_TIMEZONE)
 
     location_store = LocationStore(settings.db_path)
     location_store.initialize()
@@ -42,15 +45,24 @@ def create_app(settings: Settings | None = None) -> Flask:
         timeout_seconds=settings.http_timeout_seconds,
         user_agent=settings.http_user_agent,
     )
+    realtime_service = GTFSRealtimeService(
+        enabled=settings.enable_realtime,
+        trip_updates_url=settings.realtime_trip_updates_url,
+        api_key=settings.realtime_api_key,
+        timeout_seconds=settings.http_timeout_seconds,
+        user_agent=settings.http_user_agent,
+    )
     cdta_service = CDTAService(
         gtfs_loader,
         nearby_stop_limit=settings.nearby_stop_limit,
         nearby_stop_radius_miles=settings.nearby_stop_radius_miles,
+        realtime_service=realtime_service,
     )
 
     app.extensions["location_store"] = location_store
     app.extensions["geocoder"] = geocoder
     app.extensions["cdta_service"] = cdta_service
+    app.extensions["realtime_service"] = realtime_service
 
     @app.context_processor
     def inject_global_template_values() -> dict[str, Any]:
@@ -58,6 +70,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             "app_name": "CDTA Local Lookup",
             "feed_status": cdta_service.get_feed_status(),
             "realtime_enabled": settings.enable_realtime,
+            "realtime_configured": bool(settings.enable_realtime and settings.realtime_trip_updates_url),
         }
 
     def render_home(
@@ -82,43 +95,46 @@ def create_app(settings: Settings | None = None) -> Flask:
             status_code,
         )
 
-    def resolve_location(scope: str, form_data: dict[str, str]) -> ResolvedLocation:
-        mode = form_data.get(f"{scope}_mode", "typed")
-        scope_name = scope.title()
+    def resolved_from_saved_location(saved_location: SavedLocation) -> ResolvedLocation:
+        return ResolvedLocation(
+            source_type="saved",
+            label=saved_location.original_label,
+            latitude=saved_location.latitude,
+            longitude=saved_location.longitude,
+            nickname=saved_location.nickname,
+            saved_location_id=saved_location.id,
+        )
 
-        if mode == "current":
-            latitude, longitude = parse_coordinate_fields(
-                form_data.get(f"{scope}_current_lat"),
-                form_data.get(f"{scope}_current_lon"),
-                field_name=f"{scope_name} current location",
-            )
-            label = form_data.get(f"{scope}_current_label", "").strip() or f"{scope_name} browser location"
-            return ResolvedLocation(
-                source_type="current",
-                label=label,
-                latitude=latitude,
-                longitude=longitude,
-            )
-
-        if mode == "saved":
-            saved_id_text = require_text(form_data.get(f"{scope}_saved_id"), f"{scope_name} saved location")
+    def resolve_saved_reference(
+        scope_name: str,
+        *,
+        saved_id: Any | None = None,
+        nickname: Any | None = None,
+        reference: Any | None = None,
+    ) -> ResolvedLocation:
+        if saved_id is not None and saved_id != "":
+            saved_id_text = require_text(saved_id, f"{scope_name} saved location")
             try:
-                saved_id = int(saved_id_text)
+                location_id = int(saved_id_text)
             except ValueError as exc:
                 raise ValidationError(f"{scope_name} saved location is invalid.") from exc
+            return resolved_from_saved_location(location_store.get_location(location_id))
 
-            saved_location = location_store.get_location(saved_id)
-            return ResolvedLocation(
-                source_type="saved",
-                label=saved_location.original_label,
-                latitude=saved_location.latitude,
-                longitude=saved_location.longitude,
-                nickname=saved_location.nickname,
-                saved_location_id=saved_location.id,
-            )
+        if nickname is not None and nickname != "":
+            clean_nickname = require_text(nickname, f"{scope_name} saved nickname", max_length=80)
+            return resolved_from_saved_location(location_store.get_location_by_nickname(clean_nickname))
 
-        typed_input = require_text(form_data.get(f"{scope}_typed_input"), f"{scope_name} location", max_length=200)
-        lat_lon = parse_lat_lon_input(typed_input)
+        if reference is not None and reference != "":
+            saved_reference = require_text(reference, f"{scope_name} saved location", max_length=80)
+            if saved_reference.isdigit():
+                return resolved_from_saved_location(location_store.get_location(int(saved_reference)))
+            return resolved_from_saved_location(location_store.get_location_by_nickname(saved_reference))
+
+        raise ValidationError(f"{scope_name} saved location is required.")
+
+    def resolve_typed_location(scope_name: str, typed_input: Any) -> ResolvedLocation:
+        clean_input = require_text(typed_input, f"{scope_name} location", max_length=200)
+        lat_lon = parse_lat_lon_input(clean_input)
         if lat_lon is not None:
             latitude, longitude = lat_lon
             return ResolvedLocation(
@@ -128,12 +144,79 @@ def create_app(settings: Settings | None = None) -> Flask:
                 longitude=longitude,
             )
 
-        match = geocoder.geocode(typed_input)
+        match = geocoder.geocode(clean_input)
         return ResolvedLocation(
             source_type="typed",
             label=match.label,
             latitude=match.latitude,
             longitude=match.longitude,
+        )
+
+    def resolve_location_spec(
+        scope_name: str,
+        *,
+        mode: str,
+        latitude: Any | None = None,
+        longitude: Any | None = None,
+        label: Any | None = None,
+        typed_input: Any | None = None,
+        saved_id: Any | None = None,
+        nickname: Any | None = None,
+        saved_reference: Any | None = None,
+    ) -> ResolvedLocation:
+        normalized_mode = require_text(mode, f"{scope_name} mode", max_length=20).lower()
+
+        if normalized_mode == "current":
+            resolved_latitude, resolved_longitude = parse_coordinate_fields(
+                latitude,
+                longitude,
+                field_name=f"{scope_name} current location",
+            )
+            clean_label = str(label or "").strip() or f"{scope_name} provided coordinates"
+            return ResolvedLocation(
+                source_type="current",
+                label=clean_label,
+                latitude=resolved_latitude,
+                longitude=resolved_longitude,
+            )
+
+        if normalized_mode == "saved":
+            return resolve_saved_reference(
+                scope_name,
+                saved_id=saved_id,
+                nickname=nickname,
+                reference=saved_reference,
+            )
+
+        if normalized_mode == "typed":
+            return resolve_typed_location(scope_name, typed_input)
+
+        raise ValidationError(f"{scope_name} mode is invalid.")
+
+    def resolve_location(scope: str, form_data: dict[str, str]) -> ResolvedLocation:
+        scope_name = scope.title()
+        mode = form_data.get(f"{scope}_mode", "typed")
+
+        if mode == "current":
+            return resolve_location_spec(
+                scope_name,
+                mode="current",
+                latitude=form_data.get(f"{scope}_current_lat"),
+                longitude=form_data.get(f"{scope}_current_lon"),
+                label=form_data.get(f"{scope}_current_label", "").strip() or f"{scope_name} browser location",
+            )
+
+        if mode == "saved":
+            return resolve_location_spec(
+                scope_name,
+                mode="saved",
+                saved_id=form_data.get(f"{scope}_saved_id"),
+            )
+
+        return resolve_location_spec(
+            scope_name,
+            mode="typed",
+            typed_input=form_data.get(f"{scope}_typed_input"),
         )
 
     def resolve_location_input_for_save(location_input: str) -> tuple[str, float, float]:
@@ -144,6 +227,201 @@ def create_app(settings: Settings | None = None) -> Flask:
 
         match = geocoder.geocode(location_input)
         return match.label, match.latitude, match.longitude
+
+    def parse_positive_int(value: Any, field_name: str, *, default: int, maximum: int) -> int:
+        if value is None or value == "":
+            return default
+
+        raw_text = require_text(value, field_name, max_length=12)
+        try:
+            parsed_value = int(raw_text)
+        except ValueError as exc:
+            raise ValidationError(f"{field_name} must be a whole number.") from exc
+
+        if parsed_value < 1 or parsed_value > maximum:
+            raise ValidationError(f"{field_name} must be between 1 and {maximum}.")
+        return parsed_value
+
+    def api_error(message: str, status_code: int, *, code: str, details: dict[str, Any] | None = None):
+        payload: dict[str, Any] = {
+            "error": {
+                "code": code,
+                "message": message,
+                "status": status_code,
+            }
+        }
+        if details:
+            payload["error"]["details"] = details
+        response = jsonify(payload)
+        response.status_code = status_code
+        return response
+
+    def status_code_for_resolution_error(exc: Exception) -> int:
+        if isinstance(exc, SavedLocationNotFoundError):
+            return 404
+        if isinstance(exc, GeocodeError) and "Could not reach" in str(exc):
+            return 502
+        return 400
+
+    def serialize_saved_location(saved_location: SavedLocation) -> dict[str, Any]:
+        return {
+            "id": saved_location.id,
+            "nickname": saved_location.nickname,
+            "original_label": saved_location.original_label,
+            "latitude": saved_location.latitude,
+            "longitude": saved_location.longitude,
+            "created_at": saved_location.created_at,
+            "updated_at": saved_location.updated_at,
+        }
+
+    def serialize_departure(departure) -> dict[str, Any]:
+        return {
+            "trip_id": departure.trip_id,
+            "headsign": departure.headsign,
+            "scheduled_departure": departure.scheduled_departure.isoformat(),
+            "realtime_departure": departure.realtime_departure.isoformat() if departure.realtime_departure else None,
+            "effective_departure": departure.effective_departure.isoformat(),
+            "minutes": departure.minutes_until_departure,
+            "source": departure.source,
+            "delay_seconds": departure.delay_seconds,
+        }
+
+    def serialize_route(route, next_departures: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "route_id": route.route_id,
+            "short_name": route.short_name,
+            "long_name": route.long_name,
+            "display_name": route.display_name,
+            "next_departures": next_departures,
+        }
+
+    def serialize_stop_result(stop_result) -> dict[str, Any]:
+        departure_groups = {group.route.route_id: group for group in stop_result.route_departures}
+        routes_payload = []
+        for route in stop_result.routes:
+            group = departure_groups.get(route.route_id)
+            departures_payload = [serialize_departure(departure) for departure in group.departures] if group else []
+            route_payload = serialize_route(route, departures_payload)
+            if group and group.headsign:
+                route_payload["headsign"] = group.headsign
+            routes_payload.append(route_payload)
+
+        return {
+            "stop_id": stop_result.stop.stop_id,
+            "stop_name": stop_result.stop.name,
+            "distance_miles": round(stop_result.distance_miles, 2),
+            "within_radius": stop_result.within_radius,
+            "departure_source_note": stop_result.departures_summary_label,
+            "routes": routes_payload,
+        }
+
+    def serialize_lookup_result(
+        origin: ResolvedLocation,
+        destination: ResolvedLocation,
+        transit_result: TransitLookupResult,
+    ) -> dict[str, Any]:
+        return {
+            "origin": {
+                "label": origin.label,
+                "source_type": origin.source_type,
+                "nickname": origin.nickname,
+                "saved_location_id": origin.saved_location_id,
+                "latitude": origin.latitude,
+                "longitude": origin.longitude,
+            },
+            "destination": {
+                "label": destination.label,
+                "source_type": destination.source_type,
+                "nickname": destination.nickname,
+                "saved_location_id": destination.saved_location_id,
+                "latitude": destination.latitude,
+                "longitude": destination.longitude,
+            },
+            "origin_nearest_stops": [serialize_stop_result(stop_result) for stop_result in transit_result.origin_stops],
+            "destination_nearest_stops": [
+                serialize_stop_result(stop_result) for stop_result in transit_result.destination_stops
+            ],
+            "shared_routes": [
+                {
+                    "route_id": route.route_id,
+                    "short_name": route.short_name,
+                    "long_name": route.long_name,
+                    "display_name": route.display_name,
+                }
+                for route in transit_result.shared_routes
+            ],
+            "direct_candidates": [
+                {
+                    "route_id": candidate.route.route_id,
+                    "display_name": candidate.route.display_name,
+                    "origin_stop_id": candidate.origin_stop.stop_id,
+                    "origin_stop_name": candidate.origin_stop.name,
+                    "destination_stop_id": candidate.destination_stop.stop_id,
+                    "destination_stop_name": candidate.destination_stop.name,
+                    "origin_distance_miles": round(candidate.origin_distance_miles, 2),
+                    "destination_distance_miles": round(candidate.destination_distance_miles, 2),
+                    "trip_headsign": candidate.trip_headsign,
+                    "stop_gap": candidate.stop_gap,
+                }
+                for candidate in transit_result.direct_candidates
+            ],
+            "realtime_used": transit_result.realtime_used,
+            "generated_at": transit_result.generated_at.isoformat(),
+            "note": transit_result.note,
+        }
+
+    def resolve_api_location_from_query(scope: str) -> ResolvedLocation:
+        scope_name = scope.title()
+        latitude = request.args.get(f"{scope}_lat")
+        longitude = request.args.get(f"{scope}_lon")
+        typed_input = request.args.get(f"{scope}_query")
+        saved_reference = request.args.get(f"{scope}_saved")
+        label = request.args.get(f"{scope}_label")
+
+        if (latitude is not None and latitude != "") or (longitude is not None and longitude != ""):
+            return resolve_location_spec(
+                scope_name,
+                mode="current",
+                latitude=latitude,
+                longitude=longitude,
+                label=label or f"{scope_name} provided coordinates",
+            )
+
+        if saved_reference is not None and saved_reference != "":
+            return resolve_location_spec(
+                scope_name,
+                mode="saved",
+                saved_reference=saved_reference,
+            )
+
+        if typed_input is not None and typed_input != "":
+            return resolve_location_spec(
+                scope_name,
+                mode="typed",
+                typed_input=typed_input,
+            )
+
+        raise ValidationError(
+            f"{scope_name} lookup parameters are required. Provide coordinates, a query, or a saved location."
+        )
+
+    def resolve_api_location_from_payload(scope: str, payload: dict[str, Any]) -> ResolvedLocation:
+        scope_name = scope.title()
+        raw_location = payload.get(scope)
+        if not isinstance(raw_location, dict):
+            raise ValidationError(f"{scope_name} payload is required.")
+
+        mode = raw_location.get("mode")
+        return resolve_location_spec(
+            scope_name,
+            mode=mode,
+            latitude=raw_location.get("latitude"),
+            longitude=raw_location.get("longitude"),
+            label=raw_location.get("label") or f"{scope_name} provided coordinates",
+            typed_input=raw_location.get("query"),
+            saved_id=raw_location.get("saved_id"),
+            nickname=raw_location.get("nickname"),
+        )
 
     @app.get("/")
     def index():
@@ -181,7 +459,11 @@ def create_app(settings: Settings | None = None) -> Flask:
         transit_error = None
 
         try:
-            transit_result = cdta_service.lookup(origin, destination)
+            transit_result = cdta_service.lookup(
+                origin,
+                destination,
+                now=app.config["NOW_PROVIDER"](),
+            )
         except (GTFSDownloadError, GTFSLoadError) as exc:
             transit_error = str(exc)
 
@@ -267,6 +549,90 @@ def create_app(settings: Settings | None = None) -> Flask:
             flash(str(exc), "error")
 
         return redirect(request.referrer or url_for("index"))
+
+    @app.get("/api/health")
+    def api_health():
+        return jsonify(
+            {
+                "status": "ok",
+                "timestamp": datetime.now(tz=SERVICE_TIMEZONE).isoformat(),
+            }
+        )
+
+    @app.get("/api/saved-locations")
+    def api_saved_locations():
+        return jsonify(
+            {
+                "saved_locations": [
+                    serialize_saved_location(saved_location) for saved_location in location_store.list_locations()
+                ],
+                "generated_at": datetime.now(tz=SERVICE_TIMEZONE).isoformat(),
+            }
+        )
+
+    @app.route("/api/lookup", methods=["GET", "POST"])
+    def api_lookup():
+        try:
+            if request.method == "GET":
+                origin = resolve_api_location_from_query("origin")
+                destination = resolve_api_location_from_query("destination")
+                max_stops = parse_positive_int(
+                    request.args.get("max_stops"),
+                    "max_stops",
+                    default=settings.nearby_stop_limit,
+                    maximum=10,
+                )
+                max_departures_per_route = parse_positive_int(
+                    request.args.get("max_departures_per_route"),
+                    "max_departures_per_route",
+                    default=2,
+                    maximum=5,
+                )
+            else:
+                payload = request.get_json(silent=True)
+                if not isinstance(payload, dict):
+                    return api_error(
+                        "POST /api/lookup requires a JSON object body.",
+                        400,
+                        code="invalid_json",
+                    )
+
+                origin = resolve_api_location_from_payload("origin", payload)
+                destination = resolve_api_location_from_payload("destination", payload)
+                max_stops = parse_positive_int(
+                    payload.get("max_stops"),
+                    "max_stops",
+                    default=settings.nearby_stop_limit,
+                    maximum=10,
+                )
+                max_departures_per_route = parse_positive_int(
+                    payload.get("max_departures_per_route"),
+                    "max_departures_per_route",
+                    default=2,
+                    maximum=5,
+                )
+
+            transit_result = cdta_service.lookup(
+                origin,
+                destination,
+                now=app.config["NOW_PROVIDER"](),
+                max_stops=max_stops,
+                max_departures_per_route=max_departures_per_route,
+            )
+        except (ValidationError, SavedLocationNotFoundError, GeocodeError) as exc:
+            return api_error(
+                str(exc),
+                status_code_for_resolution_error(exc),
+                code="invalid_request",
+            )
+        except (GTFSDownloadError, GTFSLoadError) as exc:
+            return api_error(
+                str(exc),
+                503,
+                code="gtfs_unavailable",
+            )
+
+        return jsonify(serialize_lookup_result(origin, destination, transit_result))
 
     return app
 

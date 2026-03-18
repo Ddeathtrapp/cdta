@@ -49,7 +49,8 @@ body {
 .form-actions,
 .chip-row,
 .candidate-list,
-.flash-stack {
+.flash-stack,
+.departure-list {
     display: grid;
     gap: 1rem;
 }
@@ -344,6 +345,54 @@ button.danger {
     border-left: 4px solid var(--danger);
 }
 
+.callout-card {
+    background: rgba(255, 255, 255, 0.6);
+}
+
+.departures-panel {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+}
+
+.departure-note {
+    margin-bottom: 0.75rem;
+}
+
+.departure-list {
+    gap: 0.75rem;
+}
+
+.departure-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: start;
+    padding: 0.85rem 0.95rem;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.55);
+}
+
+.departure-route,
+.departure-times {
+    margin-bottom: 0;
+}
+
+.departure-route {
+    font-weight: 700;
+}
+
+.departure-headsign {
+    margin-top: 0.25rem;
+    margin-bottom: 0;
+}
+
+.departure-times {
+    font-weight: 700;
+    color: var(--accent-dark);
+    white-space: nowrap;
+}
+
 code {
     padding: 0.18rem 0.4rem;
     border-radius: 8px;
@@ -372,5 +421,13 @@ code {
     .button.primary,
     button.primary {
         width: 100%;
+    }
+
+    .departure-row {
+        flex-direction: column;
+    }
+
+    .departure-times {
+        white-space: normal;
     }
 }

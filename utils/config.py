@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,6 +67,7 @@ class Settings:
     nearby_stop_radius_miles: float
     enable_realtime: bool
     realtime_trip_updates_url: str | None
+    realtime_api_key: str | None
     realtime_vehicle_positions_url: str | None
 
 
@@ -76,13 +78,15 @@ def load_settings() -> Settings:
     instance_path = project_root / "instance"
     data_dir = project_root / "data"
 
+    secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+
     return Settings(
         project_root=project_root,
         instance_path=instance_path,
         data_dir=data_dir,
         db_path=instance_path / "saved_locations.sqlite",
         flask_env=os.environ.get("FLASK_ENV", "development"),
-        secret_key=os.environ.get("SECRET_KEY", "dev-only-secret-key"),
+        secret_key=secret_key,
         host=os.environ.get("HOST", "127.0.0.1"),
         port=_get_int("PORT", 5000),
         debug=_get_bool("FLASK_DEBUG", os.environ.get("FLASK_ENV", "development") == "development"),
@@ -99,5 +103,6 @@ def load_settings() -> Settings:
         nearby_stop_radius_miles=_get_float("NEARBY_STOP_RADIUS_MILES", 0.75),
         enable_realtime=_get_bool("ENABLE_REALTIME", False),
         realtime_trip_updates_url=os.environ.get("CDTA_REALTIME_TRIP_UPDATES_URL") or None,
+        realtime_api_key=os.environ.get("CDTA_REALTIME_API_KEY") or None,
         realtime_vehicle_positions_url=os.environ.get("CDTA_REALTIME_VEHICLE_POSITIONS_URL") or None,
     )

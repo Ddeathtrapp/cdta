@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,6 +70,22 @@ class LocationStore:
                 WHERE id = ?
                 """,
                 (location_id,),
+            ).fetchone()
+
+        if row is None:
+            raise SavedLocationNotFoundError("Saved location was not found.")
+        return self._row_to_location(row)
+
+    def get_location_by_nickname(self, nickname: str) -> SavedLocation:
+        normalized_nickname = normalize_nickname(validate_nickname(nickname))
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, nickname, original_label, latitude, longitude, created_at, updated_at
+                FROM saved_locations
+                WHERE nickname_normalized = ?
+                """,
+                (normalized_nickname,),
             ).fetchone()
 
         if row is None:
@@ -159,10 +176,18 @@ class LocationStore:
             if cursor.rowcount == 0:
                 raise SavedLocationNotFoundError("Saved location was not found.")
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     @staticmethod
     def _row_to_location(row: sqlite3.Row) -> SavedLocation:
