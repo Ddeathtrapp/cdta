@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero card">
+    <div>
+        <p class="eyebrow">Simple trip shortlist</p>
+        <h1>Choose an origin and destination for CDTA lookup.</h1>
+        <p class="lede">
+            This MVP resolves your points to coordinates, finds nearby CDTA stops, and highlights route overlap.
+            It is intentionally honest about limits: shared routes are not the same thing as a guaranteed itinerary.
+        </p>
+    </div>
+    <a class="button secondary" href="{{ url_for('saved_locations') }}">Manage Saved Nicknames</a>
+</section>
+
+{% if errors.form %}
+    <section class="card">
+        <p class="error-text">{{ errors.form }}</p>
+    </section>
+{% endif %}
+
+<form class="search-form" method="post" action="{{ url_for('search') }}">
+    <section class="card location-panel" data-scope="origin">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Start</p>
+                <h2>Origin</h2>
+            </div>
+            <span class="pill info">Choose current, typed, or saved</span>
+        </div>
+
+        {% if errors.origin %}
+            <p class="error-text">{{ errors.origin }}</p>
+        {% endif %}
+
+        <div class="mode-grid">
+            <label class="mode-choice">
+                <input type="radio" name="origin_mode" value="current" {% if form_data.origin_mode == 'current' %}checked{% endif %}>
+                <span>Use current location</span>
+            </label>
+            <label class="mode-choice">
+                <input type="radio" name="origin_mode" value="typed" {% if form_data.origin_mode == 'typed' %}checked{% endif %}>
+                <span>Type a location</span>
+            </label>
+            <label class="mode-choice">
+                <input type="radio" name="origin_mode" value="saved" {% if form_data.origin_mode == 'saved' %}checked{% endif %}>
+                <span>Use a saved nickname</span>
+            </label>
+        </div>
+
+        <div class="mode-content" data-mode="current">
+            <button class="button secondary js-current-location" type="button">Use browser location</button>
+            <p class="status-text js-current-status">No browser location captured yet.</p>
+            <input type="hidden" name="origin_current_lat" value="{{ form_data.origin_current_lat or '' }}">
+            <input type="hidden" name="origin_current_lon" value="{{ form_data.origin_current_lon or '' }}">
+            <input type="hidden" name="origin_current_label" value="{{ form_data.origin_current_label or '' }}">
+        </div>
+
+        <div class="mode-content" data-mode="typed">
+            <label for="origin_typed_input">Street address or raw coordinates</label>
+            <input
+                id="origin_typed_input"
+                name="origin_typed_input"
+                type="text"
+                value="{{ form_data.origin_typed_input or '' }}"
+                placeholder="110 State St Albany NY or 42.6526,-73.7562"
+            >
+        </div>
+
+        <div class="mode-content" data-mode="saved">
+            <label for="origin_saved_id">Saved nickname</label>
+            <select id="origin_saved_id" name="origin_saved_id">
+                <option value="">Choose a saved location</option>
+                {% for saved in saved_locations %}
+                    <option value="{{ saved.id }}" {% if form_data.origin_saved_id == saved.id|string %}selected{% endif %}>
+                        {{ saved.nickname }} - {{ saved.original_label }}
+                    </option>
+                {% endfor %}
+            </select>
+            {% if not saved_locations %}
+                <p class="muted-text">No saved nicknames yet. Add one from the Saved Locations page.</p>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="card location-panel" data-scope="destination">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Finish</p>
+                <h2>Destination</h2>
+            </div>
+            <span class="pill info">Current location is also allowed</span>
+        </div>
+
+        {% if errors.destination %}
+            <p class="error-text">{{ errors.destination }}</p>
+        {% endif %}
+
+        <div class="mode-grid">
+            <label class="mode-choice">
+                <input type="radio" name="destination_mode" value="typed" {% if form_data.destination_mode == 'typed' %}checked{% endif %}>
+                <span>Type a location</span>
+            </label>
+            <label class="mode-choice">
+                <input type="radio" name="destination_mode" value="saved" {% if form_data.destination_mode == 'saved' %}checked{% endif %}>
+                <span>Use a saved nickname</span>
+            </label>
+            <label class="mode-choice">
+                <input type="radio" name="destination_mode" value="current" {% if form_data.destination_mode == 'current' %}checked{% endif %}>
+                <span>Use current location</span>
+            </label>
+        </div>
+
+        <div class="mode-content" data-mode="typed">
+            <label for="destination_typed_input">Street address or raw coordinates</label>
+            <input
+                id="destination_typed_input"
+                name="destination_typed_input"
+                type="text"
+                value="{{ form_data.destination_typed_input or '' }}"
+                placeholder="1 Crossgates Mall Rd Albany NY or 42.6881,-73.8498"
+            >
+        </div>
+
+        <div class="mode-content" data-mode="saved">
+            <label for="destination_saved_id">Saved nickname</label>
+            <select id="destination_saved_id" name="destination_saved_id">
+                <option value="">Choose a saved location</option>
+                {% for saved in saved_locations %}
+                    <option value="{{ saved.id }}" {% if form_data.destination_saved_id == saved.id|string %}selected{% endif %}>
+                        {{ saved.nickname }} - {{ saved.original_label }}
+                    </option>
+                {% endfor %}
+            </select>
+            {% if not saved_locations %}
+                <p class="muted-text">No saved nicknames yet. Add one from the Saved Locations page.</p>
+            {% endif %}
+        </div>
+
+        <div class="mode-content" data-mode="current">
+            <button class="button secondary js-current-location" type="button">Use browser location</button>
+            <p class="status-text js-current-status">No browser location captured yet.</p>
+            <input type="hidden" name="destination_current_lat" value="{{ form_data.destination_current_lat or '' }}">
+            <input type="hidden" name="destination_current_lon" value="{{ form_data.destination_current_lon or '' }}">
+            <input type="hidden" name="destination_current_label" value="{{ form_data.destination_current_label or '' }}">
+        </div>
+    </section>
+
+    <div class="form-actions">
+        <button class="button primary" type="submit">Find Nearby CDTA Stops</button>
+    </div>
+</form>
+{% endblock %}

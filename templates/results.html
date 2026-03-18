@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero card">
+    <div>
+        <p class="eyebrow">Search results</p>
+        <h1>Resolved locations and nearby CDTA routes</h1>
+        <p class="lede">
+            These results are a nearby-stop and route-overlap shortlist, not a guaranteed itinerary planner.
+        </p>
+    </div>
+    <a class="button secondary" href="{{ url_for('index') }}">New Search</a>
+</section>
+
+<section class="summary-grid">
+    <article class="card summary-card">
+        <p class="eyebrow">Origin</p>
+        <h2>{{ origin.nickname if origin.nickname else origin.label }}</h2>
+        <p class="muted-text">{{ origin.source_label }}</p>
+        {% if origin.nickname %}
+            <p>{{ origin.label }}</p>
+        {% endif %}
+        <p>{{ origin.coordinates_text }}</p>
+        {% if origin.source_type != 'saved' %}
+            <form class="inline-form" method="post" action="{{ url_for('save_resolved_location') }}">
+                <input type="hidden" name="label" value="{{ origin.label }}">
+                <input type="hidden" name="latitude" value="{{ origin.latitude }}">
+                <input type="hidden" name="longitude" value="{{ origin.longitude }}">
+                <input type="text" name="nickname" placeholder="Save as Home" required>
+                <button class="button secondary" type="submit">Save Origin</button>
+            </form>
+        {% endif %}
+    </article>
+
+    <article class="card summary-card">
+        <p class="eyebrow">Destination</p>
+        <h2>{{ destination.nickname if destination.nickname else destination.label }}</h2>
+        <p class="muted-text">{{ destination.source_label }}</p>
+        {% if destination.nickname %}
+            <p>{{ destination.label }}</p>
+        {% endif %}
+        <p>{{ destination.coordinates_text }}</p>
+        {% if destination.source_type != 'saved' %}
+            <form class="inline-form" method="post" action="{{ url_for('save_resolved_location') }}">
+                <input type="hidden" name="label" value="{{ destination.label }}">
+                <input type="hidden" name="latitude" value="{{ destination.latitude }}">
+                <input type="hidden" name="longitude" value="{{ destination.longitude }}">
+                <input type="text" name="nickname" placeholder="Save as Work" required>
+                <button class="button secondary" type="submit">Save Destination</button>
+            </form>
+        {% endif %}
+    </article>
+</section>
+
+{% if transit_error %}
+    <section class="card">
+        <p class="error-text">{{ transit_error }}</p>
+        <p class="muted-text">
+            If you already have a GTFS zip in <code>data/google_transit.zip</code>, the app will use it. Otherwise
+            try the refresh button or the CLI refresh command.
+        </p>
+    </section>
+{% else %}
+    <section class="results-grid">
+        <article class="card">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Nearby stops</p>
+                    <h2>Origin side</h2>
+                </div>
+            </div>
+            {% if transit_result.origin_stops %}
+                <div class="stop-list">
+                    {% for stop_result in transit_result.origin_stops %}
+                        <article class="stop-card">
+                            <h3>{{ stop_result.stop.name }}</h3>
+                            <p>{{ '%.2f'|format(stop_result.distance_miles) }} miles away</p>
+                            {% if not stop_result.within_radius %}
+                                <p class="muted-text">Outside the preferred radius, shown as the nearest fallback.</p>
+                            {% endif %}
+                            <div class="chip-row">
+                                {% for route in stop_result.routes %}
+                                    <span class="chip">{{ route.display_name }}</span>
+                                {% else %}
+                                    <span class="muted-text">No routes found for this stop.</span>
+                                {% endfor %}
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="muted-text">No nearby origin stops were found.</p>
+            {% endif %}
+        </article>
+
+        <article class="card">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Nearby stops</p>
+                    <h2>Destination side</h2>
+                </div>
+            </div>
+            {% if transit_result.destination_stops %}
+                <div class="stop-list">
+                    {% for stop_result in transit_result.destination_stops %}
+                        <article class="stop-card">
+                            <h3>{{ stop_result.stop.name }}</h3>
+                            <p>{{ '%.2f'|format(stop_result.distance_miles) }} miles away</p>
+                            {% if not stop_result.within_radius %}
+                                <p class="muted-text">Outside the preferred radius, shown as the nearest fallback.</p>
+                            {% endif %}
+                            <div class="chip-row">
+                                {% for route in stop_result.routes %}
+                                    <span class="chip">{{ route.display_name }}</span>
+                                {% else %}
+                                    <span class="muted-text">No routes found for this stop.</span>
+                                {% endfor %}
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="muted-text">No nearby destination stops were found.</p>
+            {% endif %}
+        </article>
+    </section>
+
+    <section class="card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Shared routes</p>
+                <h2>Overlap and direct-route candidates</h2>
+            </div>
+            <span class="pill warn">Heuristic only</span>
+        </div>
+
+        {% if transit_result.direct_candidates %}
+            <div class="candidate-list">
+                {% for candidate in transit_result.direct_candidates %}
+                    <article class="candidate-card">
+                        <h3>{{ candidate.route.display_name }}</h3>
+                        <p>{{ candidate.origin_stop.name }} to {{ candidate.destination_stop.name }}</p>
+                        <p class="muted-text">
+                            Approximate walk distances: {{ '%.2f'|format(candidate.origin_distance_miles) }} mi origin,
+                            {{ '%.2f'|format(candidate.destination_distance_miles) }} mi destination.
+                        </p>
+                        <p class="muted-text">
+                            Sample trip headsign: {{ candidate.trip_headsign or 'Not provided in feed' }}.
+                            Stop gap on the sample trip: {{ candidate.stop_gap }} stops.
+                        </p>
+                    </article>
+                {% endfor %}
+            </div>
+        {% elif transit_result.shared_routes %}
+            <p>Some routes appear on both sides, but the simple stop-order heuristic did not confirm a direct trip.</p>
+        {% else %}
+            <p>No shared routes were found across the nearby origin and destination stops.</p>
+        {% endif %}
+
+        {% if transit_result.shared_routes %}
+            <div class="chip-row">
+                {% for route in transit_result.shared_routes %}
+                    <span class="chip">{{ route.display_name }}</span>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <p class="muted-text note">{{ transit_result.note }}</p>
+    </section>
+{% endif %}
+{% endblock %}

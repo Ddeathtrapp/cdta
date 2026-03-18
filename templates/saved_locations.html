@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero card">
+    <div>
+        <p class="eyebrow">Saved nicknames</p>
+        <h1>Manage reusable origin and destination locations.</h1>
+        <p class="lede">
+            Add a nickname from an address or raw coordinates, then reuse it from the home page as either your
+            origin or destination.
+        </p>
+    </div>
+    <a class="button secondary" href="{{ url_for('index') }}">Back to Search</a>
+</section>
+
+<section class="card">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Create</p>
+            <h2>Add a saved location</h2>
+        </div>
+    </div>
+
+    <form class="stack-form" method="post" action="{{ url_for('create_saved_location') }}">
+        <label for="nickname">Nickname</label>
+        <input id="nickname" name="nickname" type="text" placeholder="Home" required>
+
+        <label for="location_input">Address or coordinates</label>
+        <input id="location_input" name="location_input" type="text" placeholder="110 State St Albany NY or 42.6526,-73.7562" required>
+
+        <button class="button primary" type="submit">Save Location</button>
+    </form>
+</section>
+
+<section class="saved-grid">
+    {% for saved in saved_locations %}
+        <article class="card saved-card">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Saved place</p>
+                    <h2>{{ saved.nickname }}</h2>
+                </div>
+            </div>
+            <p>{{ saved.original_label }}</p>
+            <p class="muted-text">{{ '%.5f'|format(saved.latitude) }}, {{ '%.5f'|format(saved.longitude) }}</p>
+            <p class="muted-text">Created {{ saved.created_at }}</p>
+            <p class="muted-text">Updated {{ saved.updated_at }}</p>
+
+            <form class="inline-form" method="post" action="{{ url_for('update_saved_location', location_id=saved.id) }}">
+                <input type="text" name="nickname" value="{{ saved.nickname }}" required>
+                <button class="button secondary" type="submit">Rename</button>
+            </form>
+
+            <form method="post" action="{{ url_for('delete_saved_location', location_id=saved.id) }}">
+                <button class="button danger" type="submit">Delete</button>
+            </form>
+        </article>
+    {% else %}
+        <article class="card">
+            <p class="muted-text">No saved nicknames yet.</p>
+        </article>
+    {% endfor %}
+</section>
+{% endblock %}
