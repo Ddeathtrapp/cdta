@@ -1,7 +1,7 @@
 # Keep this app on a single machine. SQLite and the mounted Fly volume are
 # local to that machine, so horizontal scaling is not safe without changing
 # the storage approach.
-app = "replace-with-your-fly-app-name"
+app = "blimbo-cdta"
 primary_region = "yul"
 
 [build]
