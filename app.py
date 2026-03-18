@@ -678,9 +678,6 @@ def create_app(settings: Settings | None = None) -> Flask:
     return app
 
 
-app = create_app()
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="CDTA local-first route lookup")
     parser.add_argument(
@@ -692,7 +689,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    configured_app = app
+    configured_app = create_app()
     settings: Settings = configured_app.config["SETTINGS"]
     service: CDTAService = configured_app.extensions["cdta_service"]
 

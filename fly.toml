@@ -1,0 +1,37 @@
+# Keep this app on a single machine. SQLite and the mounted Fly volume are
+# local to that machine, so horizontal scaling is not safe without changing
+# the storage approach.
+app = "replace-with-your-fly-app-name"
+primary_region = "yul"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_STORAGE_DIR = "/data"
+  FLASK_ENV = "production"
+  HOST = "0.0.0.0"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/"
+    timeout = "5s"
+
+[[mounts]]
+  source = "app_data"
+  destination = "/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"

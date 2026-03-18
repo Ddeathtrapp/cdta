@@ -226,6 +226,7 @@ def create_sample_gtfs_feed(path: Path) -> None:
 def make_test_settings(project_root: Path) -> Settings:
     return Settings(
         project_root=project_root,
+        storage_root=None,
         instance_path=project_root / "instance",
         data_dir=project_root / "data",
         db_path=(project_root / "instance" / "saved_locations.sqlite"),

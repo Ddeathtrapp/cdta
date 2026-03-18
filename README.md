@@ -27,6 +27,7 @@ Only safe, mainstream packages are used:
 - `Flask`
 - `requests`
 - `gtfs-realtime-bindings` for optional official GTFS-realtime parsing
+- `gunicorn` for Fly.io/Linux production serving
 
 ## Setup
 
@@ -63,6 +64,7 @@ FLASK_ENV=development
 SECRET_KEY=change-me
 HOST=127.0.0.1
 PORT=5000
+APP_STORAGE_DIR=
 CDTA_GTFS_URL=https://www.cdta.org/schedules/google_transit.zip
 HTTP_TIMEOUT_SECONDS=12
 HTTP_USER_AGENT=cdta-local-lookup/1.0 (+local app)
@@ -77,6 +79,7 @@ CDTA_REALTIME_VEHICLE_POSITIONS_URL=
 Notes:
 
 - `SECRET_KEY` should be set to a stable secret for any shared or deployed environment.
+- Leave `APP_STORAGE_DIR` blank for local development. When it is set, SQLite and GTFS cache files are stored under that root.
 - If `ENABLE_REALTIME=false` or `CDTA_REALTIME_TRIP_UPDATES_URL` is blank, the app stays fully usable with scheduled departures only.
 - If your realtime provider expects auth in a different shape than `x-api-key`, place the token directly in the configured URL or adapt the local config before deployment.
 
@@ -97,7 +100,8 @@ The HTML search flow now uses Post/Redirect/Get:
 
 ## Refresh GTFS data
 
-The app keeps the official CDTA GTFS zip in `data/google_transit.zip`.
+The app keeps the official CDTA GTFS zip in `data/google_transit.zip` by default.
+If `APP_STORAGE_DIR` is set, the cache moves to `APP_STORAGE_DIR/data/google_transit.zip`.
 
 To manually refresh it:
 
@@ -309,7 +313,8 @@ Typed input keeps the original safe behavior:
 
 ## Saved nicknames
 
-- Saved locations are stored in SQLite at `instance/saved_locations.sqlite`.
+- Saved locations are stored in SQLite at `instance/saved_locations.sqlite` by default.
+- If `APP_STORAGE_DIR` is set, the database moves to `APP_STORAGE_DIR/instance/saved_locations.sqlite`.
 - Nicknames are unique case-insensitively, so `Home` and `home` cannot both exist.
 - API lookup can resolve saved locations by either numeric `saved_id` or nickname.
 
@@ -320,6 +325,85 @@ Typed input keeps the original safe behavior:
 - Do not commit real secrets into `.env`.
 - `SECRET_KEY` should come from environment for deployed environments.
 - `debug` mode should stay off in production.
+
+## Fly.io deployment
+
+This repo now includes the minimum production files for a simple Fly.io deployment:
+
+- `gunicorn` in `requirements.txt`
+- `wsgi.py` as the WSGI entrypoint
+- `Dockerfile` for a repeatable Linux build
+- `fly.toml` configured for one low-cost machine with a mounted volume
+- `APP_STORAGE_DIR=/data` support so SQLite and GTFS cache persist on the Fly volume
+
+Important deployment note:
+
+- Keep this app at exactly one Fly machine. SQLite and Fly volumes are local-file storage, so running multiple machines can split writes and cache state.
+
+### 1. Install and log in to Fly
+
+Install `flyctl` from `https://fly.io/docs/flyctl/install/`, then log in:
+
+```powershell
+fly auth login
+```
+
+### 2. Choose an app name
+
+Edit `fly.toml` and replace:
+
+```toml
+app = "replace-with-your-fly-app-name"
+```
+
+Or let `fly launch` set the name for you.
+
+### 3. Initialize the Fly app
+
+From this project folder:
+
+```powershell
+fly launch --name <your-fly-app-name> --region yul --no-deploy
+```
+
+This repo already includes `fly.toml`, so `fly launch` should keep the existing shape and register the app.
+
+### 4. Create the persistent volume
+
+Saved locations and GTFS cache persistence depend on Fly volume storage:
+
+```powershell
+fly volumes create app_data --region yul --size 3
+```
+
+### 5. Set the production secret
+
+Set a real secret key before deploying:
+
+```powershell
+fly secrets set SECRET_KEY="replace-with-a-long-random-secret"
+```
+
+The app now fails clearly in production if `SECRET_KEY` is missing.
+
+### 6. Deploy
+
+```powershell
+fly deploy
+```
+
+### 7. Check logs
+
+```powershell
+fly logs
+```
+
+### Fly storage behavior
+
+- `APP_STORAGE_DIR=/data` is configured in `fly.toml`
+- SQLite will live at `/data/instance/saved_locations.sqlite`
+- GTFS cache will live at `/data/data/google_transit.zip`
+- Without the Fly volume, saved locations and GTFS cache would be lost on machine replacement or deploy
 
 ## Testing
 
