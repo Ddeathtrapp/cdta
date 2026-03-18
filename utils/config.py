@@ -49,6 +49,14 @@ def _get_float(name: str, default: float) -> float:
     return float(raw)
 
 
+def _get_optional_text(name: str) -> str | None:
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    cleaned = raw.strip()
+    return cleaned or None
+
+
 @dataclass(frozen=True)
 class Settings:
     project_root: Path
@@ -89,7 +97,7 @@ def load_settings() -> Settings:
         instance_path = project_root / "instance"
         data_dir = project_root / "data"
 
-    secret_key = os.environ.get("SECRET_KEY")
+    secret_key = _get_optional_text("SECRET_KEY")
     if not secret_key:
         if flask_env == "production":
             raise RuntimeError("SECRET_KEY must be set when FLASK_ENV=production.")
@@ -103,7 +111,7 @@ def load_settings() -> Settings:
         db_path=instance_path / "saved_locations.sqlite",
         flask_env=flask_env,
         secret_key=secret_key,
-        admin_password=os.environ.get("ADMIN_PASSWORD") or None,
+        admin_password=_get_optional_text("ADMIN_PASSWORD"),
         host=os.environ.get("HOST", "0.0.0.0" if flask_env == "production" else "127.0.0.1"),
         port=_get_int("PORT", 8080 if flask_env == "production" else 5000),
         debug=_get_bool("FLASK_DEBUG", flask_env == "development"),

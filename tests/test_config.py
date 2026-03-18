@@ -81,7 +81,7 @@ class ConfigTests(unittest.TestCase):
             os.environ,
             {
                 "SECRET_KEY": "dev-secret",
-                "ADMIN_PASSWORD": "admin-secret",
+                "ADMIN_PASSWORD": "  admin-secret  ",
             },
             clear=True,
         ):

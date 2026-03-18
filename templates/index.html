@@ -12,7 +12,7 @@
     </div>
     {% if is_admin %}
         <a class="button secondary" href="{{ url_for('saved_locations') }}">Manage Saved Nicknames</a>
-    {% elif admin_login_enabled %}
+    {% elif admin_login_available %}
         <a class="button secondary" href="{{ url_for('admin_login', next=url_for('saved_locations')) }}">Admin Login</a>
     {% endif %}
 </section>

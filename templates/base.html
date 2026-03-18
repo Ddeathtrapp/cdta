@@ -26,7 +26,7 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="button ghost" type="submit">Log Out</button>
                     </form>
-                {% elif admin_login_enabled %}
+                {% elif admin_login_available %}
                     <a href="{{ url_for('admin_login') }}">Admin Login</a>
                 {% else %}
                     <span class="muted-text">Admin login unavailable</span>

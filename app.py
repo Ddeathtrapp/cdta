@@ -38,6 +38,8 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = settings.flask_env == "production"
+    app.config["ADMIN_PASSWORD"] = settings.admin_password
+    app.config["ADMIN_LOGIN_AVAILABLE"] = bool(settings.admin_password)
 
     location_store = LocationStore(settings.db_path)
     location_store.initialize()
@@ -70,14 +72,16 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.extensions["cdta_service"] = cdta_service
     app.extensions["realtime_service"] = realtime_service
 
-    def admin_login_enabled() -> bool:
-        return bool(settings.admin_password)
+    logging.info("Admin login available: %s", app.config["ADMIN_LOGIN_AVAILABLE"])
+
+    def admin_login_available() -> bool:
+        return bool(app.config["ADMIN_LOGIN_AVAILABLE"])
 
     def admin_login_disabled_message() -> str:
         return "Admin login is disabled until ADMIN_PASSWORD is configured."
 
     def is_admin_authenticated() -> bool:
-        return bool(admin_login_enabled() and session.get("is_admin") is True)
+        return bool(admin_login_available() and session.get("is_admin") is True)
 
     def ensure_csrf_token() -> str:
         csrf_token = session.get("_csrf_token")
@@ -134,7 +138,8 @@ def create_app(settings: Settings | None = None) -> Flask:
             "realtime_enabled": settings.enable_realtime,
             "realtime_configured": bool(settings.enable_realtime and settings.realtime_trip_updates_url),
             "is_admin": is_admin_authenticated(),
-            "admin_login_enabled": admin_login_enabled(),
+            "admin_login_available": admin_login_available(),
+            "admin_login_enabled": admin_login_available(),
             "admin_login_disabled_message": admin_login_disabled_message(),
             "csrf_token": ensure_csrf_token,
         }
@@ -378,8 +383,8 @@ def create_app(settings: Settings | None = None) -> Flask:
                         )
                     )
 
-                message = admin_login_disabled_message() if not admin_login_enabled() else "Admin login required."
-                status_code = 503 if not admin_login_enabled() else 401
+                message = admin_login_disabled_message() if not admin_login_available() else "Admin login required."
+                status_code = 503 if not admin_login_available() else 401
                 return auth_error_response(message, status_code, code="admin_required")
 
             return wrapped
@@ -633,14 +638,14 @@ def create_app(settings: Settings | None = None) -> Flask:
     def admin_login():
         if is_admin_authenticated():
             return redirect(sanitize_next_url(request.args.get("next"), default=url_for("saved_locations")))
-        if not admin_login_enabled():
+        if not admin_login_available():
             return render_admin_login(error=admin_login_disabled_message(), status_code=503)
         return render_admin_login()
 
     @app.post("/admin/login")
     @csrf_protected
     def admin_login_submit():
-        if not admin_login_enabled():
+        if not admin_login_available():
             return render_admin_login(error=admin_login_disabled_message(), status_code=503)
 
         password = request.form.get("password", "")

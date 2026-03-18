@@ -116,6 +116,14 @@ class AdminAuthTests(unittest.TestCase):
         with self.client.session_transaction() as active_session:
             self.assertTrue(active_session.get("is_admin"))
 
+    def test_admin_login_page_is_available_when_password_is_configured(self) -> None:
+        response = self.client.get("/admin/login")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('name="password"', html)
+        self.assertNotIn("Admin login is disabled until ADMIN_PASSWORD is configured.", html)
+
     def test_login_failure_with_wrong_password(self) -> None:
         response = self._login(password="wrong-password")
 
