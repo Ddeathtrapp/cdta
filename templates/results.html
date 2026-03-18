@@ -9,7 +9,10 @@
             These results are a nearby-stop and route-overlap shortlist, not a guaranteed itinerary planner.
         </p>
     </div>
-    <a class="button secondary" href="{{ url_for('index') }}">New Search</a>
+    <div class="inline-form">
+        <a class="button secondary" href="{{ refresh_url }}">Refresh Times</a>
+        <a class="button secondary" href="{{ url_for('index') }}">New Search</a>
+    </div>
 </section>
 
 <section class="summary-grid">

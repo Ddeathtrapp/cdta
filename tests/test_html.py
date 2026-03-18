@@ -69,6 +69,8 @@ class HtmlResultsTests(unittest.TestCase):
         self.assertIn("Checked at 8:00 AM on March 19, 2026", html)
         self.assertIn("Routes", html)
         self.assertNotIn("Destination side", html)
+        self.assertIn("Refresh Times", html)
+        self.assertIn("/results?origin_mode=current", html)
         self.assertIn("in 5 min (departure time: 8:05 AM)", html)
 
     def test_results_get_can_be_refreshed_without_post_body(self) -> None:

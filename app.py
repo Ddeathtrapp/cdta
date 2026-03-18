@@ -400,6 +400,7 @@ def create_app(settings: Settings | None = None) -> Flask:
         }
 
     def render_results_from_form_data(form_data: dict[str, str]):
+        refresh_url = url_for("results", **build_results_query(form_data))
         errors: dict[str, str] = {}
 
         origin: ResolvedLocation | None = None
@@ -443,6 +444,7 @@ def create_app(settings: Settings | None = None) -> Flask:
                 "results.html",
                 origin=origin,
                 destination=destination,
+                refresh_url=refresh_url,
                 transit_result=transit_result,
                 transit_error=transit_error,
             ),
